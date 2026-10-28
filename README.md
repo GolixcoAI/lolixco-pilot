@@ -15,26 +15,66 @@ This repository is being developed as a long-term product. The Meta Global AI De
 
 ## Current status
 
-Planning and implementation scaffolding. See `docs/PRODUCT_SPEC.md` for the MVP, `docs/ARCHITECTURE.md` for the technical design, and `docs/HACKATHON_EXECUTION_PLAN.md` for delivery milestones.
+Phase 0 completed: application scaffold, premium dark editor design system, environment configuration validation, health endpoint (`GET /api/health`), strict Pydantic blueprint schemas, and end-to-end type-checking/testing suites established.
 
-## Intended stack
+See `docs/PRODUCT_SPEC.md` for the MVP, `docs/ARCHITECTURE.md` for the technical design, `docs/HACKATHON_EXECUTION_PLAN.md` for delivery milestones, and `docs/IMPLEMENTATION_STATUS.md` for current progress.
 
-- Next.js + TypeScript + Tailwind CSS for the studio UI.
-- FastAPI served on Modal, with Modal functions for media-processing jobs.
-- Meta Model API for video understanding, with optional transcription/segmentation/image generation added only after the core path is reliable.
-- Private Amazon S3 bucket for original video and derived previews.
-- Supabase Auth/PostgreSQL for user identity and persistent job metadata.
+## Implemented architecture
+
+- **Frontend (`frontend/`):** Next.js 16 (App Router) + TypeScript + Tailwind CSS with dark studio visual identity (near-black `#0a0c0f`, charcoal `#111418`, neon yellow `#e6ff00`, monospace timecodes, accessible focus rings).
+- **Backend (`backend/`):** FastAPI ASGI application with strict CORS allowlist, environment settings validation (Pydantic Settings), public health endpoint (`/api/health`), and Pydantic schemas validating the Editing Blueprint data contract.
+- **Zero-Leak Policy:** Server secrets (`MODEL_API_KEY`, AWS credentials, Supabase service keys) are never exposed via API endpoints or frontend bundles. No external API calls occur in automated test suites.
+
+## Developer quickstart
+
+### Prerequisites
+
+- Node.js `v20+` (verified on `v24.18.0`) and npm (`11.16.0`)
+- Python `3.11+` (verified on `3.13.14`)
+
+### Setup
+
+1. **Configure Environment:**
+   ```bash
+   cp .env.example .env
+   ```
+2. **Setup Backend Virtualenv & Dependencies:**
+   ```bash
+   python3 -m venv .venv
+   .venv/bin/pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+   ```
+3. **Setup Frontend Dependencies:**
+   ```bash
+   npm --prefix frontend install
+   ```
+
+### Running locally
+
+- **Run Frontend Dev Server (port 3000):**
+  ```bash
+  npm run dev:frontend
+  ```
+- **Run Backend FastAPI Server (port 8000):**
+  ```bash
+  npm run dev:backend
+  ```
+
+### Verification & tests
+
+Run all static analysis, type checks, and tests with zero external API calls:
+```bash
+# Run everything:
+npm run check:all
+
+# Or individually:
+npm run lint         # ESLint (frontend) + Ruff (backend)
+npm run type-check   # tsc (frontend) + Mypy strict (backend)
+npm test             # Vitest (frontend) + Pytest (backend)
+```
 
 ## Security and privacy
 
 Never commit a real `.env` file, API keys, cloud credentials, or user footage. Originals belong in private object storage and should be accessed with short-lived signed URLs. The Meta dashboard screenshot used during planning warns that content processed while using free credits may be used for product improvement. Until the account's exact terms are confirmed, use only authorized, non-sensitive demo footage.
-
-## Start building
-
-1. Read `AGENTS.md` and all documents under `docs/`.
-2. Install the official Modal agent skill in Antigravity using `modal skills install` (see `docs/MODAL_SKILL_SETUP.md`).
-3. Open `docs/ANTIGRAVITY_FIRST_PROMPT.md` and paste the prompt into Antigravity.
-4. Implement one tested milestone at a time. Never run real paid AI calls in automated tests.
 
 ## References
 

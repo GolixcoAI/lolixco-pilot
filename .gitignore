@@ -34,6 +34,8 @@ temp/
 *.jpg
 *.jpeg
 *.png
+!frontend/public/brand/**
+!docs/reference/**
 
 # OS / editor
 .DS_Store
