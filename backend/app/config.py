@@ -59,15 +59,58 @@ class Settings(BaseSettings):
 
     # External Provider Configs (optional for Phase 0 scaffold & testing)
     MODEL_API_KEY: str = Field(default="", description="Meta Model API Key (server-only)")
+    AI_PROVIDER: str = Field(
+        default="mock",
+        description="Active AI provider: 'baseten' or 'mock' (default: mock for credit safety)",
+    )
+    BASETEN_API_KEY: str = Field(
+        default="", description="Baseten API Key for model inference (server-only, never logged)"
+    )
+    BASETEN_BASE_URL: str = Field(
+        default="https://inference.baseten.co/v1",
+        description="Baseten OpenAI-compatible inference base URL",
+    )
+    BASETEN_MODEL: str = Field(
+        default="meta-models/muse-spark-open-1026",
+        description="Baseten model identifier for Muse Spark Open",
+    )
+    AI_REQUEST_TIMEOUT_SECONDS: int = Field(
+        default=120,
+        gt=5,
+        le=300,
+        description="Timeout in seconds for model inference requests",
+    )
+    AI_MAX_RETRIES: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Max retries on transient errors (429, 502, 503, 504)",
+    )
     SUPABASE_URL: str = Field(default="", description="Supabase project URL")
     SUPABASE_SERVICE_ROLE_KEY: str = Field(default="", description="Supabase service role secret")
     SUPABASE_JWT_SECRET: str = Field(
-        default="", description="Supabase JWT secret for auth verification"
+        default="", description="Supabase JWT secret for symmetric HS256 auth verification"
+    )
+    SUPABASE_JWKS_URL: str = Field(
+        default="",
+        description="Optional Supabase JWKS URL (defaults to {SUPABASE_URL}/auth/v1/jwks)",
+    )
+    SUPABASE_JWT_AUDIENCE: str = Field(
+        default="authenticated",
+        description="Expected JWT audience claim (default: authenticated)",
+    )
+    SUPABASE_JWT_ISSUER: str = Field(
+        default="",
+        description="Expected JWT issuer claim (e.g. {SUPABASE_URL}/auth/v1)",
     )
     AWS_REGION: str = Field(default="ap-south-1", description="AWS S3 Region")
     AWS_S3_BUCKET: str = Field(default="", description="Private AWS S3 Bucket Name")
     AWS_ACCESS_KEY_ID: str = Field(default="", description="AWS Access Key ID")
     AWS_SECRET_ACCESS_KEY: str = Field(default="", description="AWS Secret Access Key")
+    AWS_PROFILE: str = Field(default="", description="Optional AWS CLI profile name")
+    USE_MOCK_STORAGE: bool = Field(
+        default=False, description="Explicitly force in-memory mock storage provider"
+    )
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod

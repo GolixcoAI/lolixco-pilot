@@ -2,7 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
+from .routes.analysis import router as analysis_router
 from .routes.health import router as health_router
+from .routes.media import router as media_router
+from .routes.projects import router as projects_router
 
 settings = get_settings()
 
@@ -19,10 +22,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# Mount health router at /api and root alias
+# Mount routers
 app.include_router(health_router, prefix="/api")
 app.include_router(health_router, prefix="")
+app.include_router(projects_router)
+app.include_router(media_router)
+app.include_router(analysis_router)

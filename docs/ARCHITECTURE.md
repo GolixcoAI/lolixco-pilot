@@ -50,56 +50,99 @@ Studio: video player + scene cards + timestamp timeline + creative notes
 
 Store the original source file in a **private S3 bucket**. Do not store it in the Git repository, frontend public folder, Modal container filesystem, or a long-lived public URL.
 
-Suggested key layout:
+Implemented key layout:
 
 ```text
-users/{user_id}/analyses/{analysis_id}/source/{safe_filename}
-users/{user_id}/analyses/{analysis_id}/previews/scene-01.jpg
-users/{user_id}/analyses/{analysis_id}/previews/scene-02.jpg
+users/{user_id}/projects/{project_id}/media/{media_id}/{unpredictable_token}.{ext}
 ```
 
-- Browser asks the API for a short-lived presigned upload URL and uploads directly to S3.
-- API verifies the authenticated user owns the analysis and uses `head_object` plus media inspection before processing.
-- The API creates a short-lived presigned GET URL for the model/worker; never save the signed URL in Postgres or logs.
-- The video player receives a short-lived presigned GET URL. Refresh it on demand.
-- Private bucket, public access blocked, bucket CORS limited to the deployed frontend origin, encryption at rest enabled.
-- Use a least-privilege IAM identity scoped to this bucket and required operations. Never use root AWS credentials.
+- Browser requests a short-lived presigned upload URL from the API and uploads directly to S3 via PUT.
+- API verifies the authenticated user owns the project/media and uses S3 `head_object` to verify existence and byte size before marking the media `verified`.
+- The video player receives a short-lived presigned GET URL (15m TTL).
+- Private bucket, all public access blocked, bucket CORS limited to the frontend origin, SSE-S3 encryption enabled.
+- Idempotent setup script provided in `scripts/aws/setup_media_bucket.sh`.
+- Local development leverages boto3's standard credential chain (`~/.aws/credentials` or `AWS_PROFILE`). Production will use IAM roles.
 
-### Retention
+### Retention & Lifecycle Interaction
 
-For the hackathon build, configure a short retention default (7 days) for source uploads and derived previews, plus a visible “Delete project” action. Make the retention window configurable. Before production, add explicit user-controlled retention and deletion of all source and derived objects.
+- **Database Retention:** `expires_at = created_at + 7 days`. On playback request, backend enforces HTTP 410 Gone if `now > expires_at`, ensuring stale DB records never make expired videos appear playable.
+- **S3 Storage Lifecycle:** Automated S3 Lifecycle Rule (`ExpireUserFootageAfter7Days`) configured to delete objects under prefix `users/` after 7 days, and clean up incomplete multipart uploads after 1 day.
+- **Interaction:** Because S3 lifecycle runs asynchronously (once daily), database expiration immediately prevents playback access at the 7-day boundary, and S3 physical object deletion cleans up underlying storage without manual intervention.
 
 ### Meta API file strategy
 
 Prefer `input_video` with a short-lived URL when it fits the API's documented flow, so we don't create an extra managed upload copy. Meta's current video-understanding docs support a public or base64 `video_url`, or a `file_id` from the Files API. Verify whether a presigned S3 URL is retrievable from Meta's service in a smoke test. If it isn't, use the Files API and implement deletion/retention according to the current API's supported operations and terms.
 
-## 4. Database model
+## 4. Database model (Phase 1 Implemented)
 
-Use migrations in source control. Initial table `analyses`:
+Use migrations in source control (`supabase/migrations/20261030160559_phase1_projects_and_media.sql`).
 
-- `id UUID PRIMARY KEY`
-- `user_id UUID NOT NULL` (Supabase Auth identity)
-- `title TEXT NULL`
-- `status TEXT NOT NULL CHECK status IN ('created','uploaded','queued','preprocessing','analyzing','ready','failed','deleting','deleted')`
-- `source_object_key TEXT NOT NULL`
-- `duration_seconds DOUBLE PRECISION NULL`
-- `width INTEGER NULL`, `height INTEGER NULL`, `filesize_bytes BIGINT NULL`
-- `creative_brief TEXT NOT NULL`
-- `model_id TEXT NULL`
-- `result_json JSONB NULL`
-- `error_code TEXT NULL`, `error_message_safe TEXT NULL`
-- `created_at TIMESTAMPTZ`, `updated_at TIMESTAMPTZ`, `expires_at TIMESTAMPTZ NULL`, `completed_at TIMESTAMPTZ NULL`
+### Supabase Project & Regional Topology
 
-Add Row Level Security so users can read/delete only their own rows. Only the server-side service role/worker can update processing status. Never ship the service role key to the browser.
+- **Supabase Project Reference:** `fhfkjviishfvfyawfckh`
+- **Supabase Region:** Singapore (`ap-southeast-1`)
+- **AWS S3 Region:** Mumbai (`ap-south-1`)
+- **Cross-Region Strategy & Latency:**
+  - This cross-region setup is intentional and optimal for initial development.
+  - Supabase handles authentication and structured metadata (lightweight JSON payloads, typically 2-10 KB). The network round-trip between Mumbai and Singapore is approximately 30-50 ms, which is imperceptible for database queries.
+  - High-bandwidth video assets (10-100 MB) stream directly between the client browser and the dedicated private S3 bucket in Mumbai (`ap-south-1`) via short-lived presigned URLs.
+  - No media binary data traverses across cloud regions or passes through Supabase database connections, avoiding inter-region egress costs and latency penalties.
 
-## 5. API contract (initial proposal)
+### Supabase GitHub Integration Configuration
 
-- `GET /api/health` — health only; no secrets or internal diagnostics.
-- `POST /api/uploads/presign` — validate declared filename/type/size, create an analysis UUID and private object key, return presigned PUT URL and required headers.
-- `POST /api/analyses` — validate uploaded object belongs to current user; create queued job; spawn Modal function; return `{analysis_id, status}`.
-- `GET /api/analyses/{analysis_id}` — owner-only status, validated result, and short-lived view URLs as needed.
-- `DELETE /api/analyses/{analysis_id}` — owner-only deletion of database record and original/derived objects; make retries safe.
-- Optional `POST /api/analyses/{analysis_id}/moodboard` — only after core MVP, explicit user click, per-user rate limit.
+- **Repository:** `GolixcoAI/lolixco-pilot`
+- **Working directory:** `.`
+- **Production branch:** `main`
+- **Automatic production deployment:** Initially disabled (manual migration review).
+- **Canonical Migration Path:** `supabase/migrations/<timestamp>_<name>.sql`
+- **Local Configuration:** `supabase/config.toml` (project ID `fhfkjviishfvfyawfckh`, anonymous sign-ins enabled, 100MiB storage limit).
+
+Implements tables:
+1. `projects`:
+   - `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`
+   - `user_id UUID NOT NULL` (Supabase Auth identity, anonymous or linked)
+   - `name TEXT NOT NULL DEFAULT 'Untitled Cut'`
+   - `aspect_ratio TEXT NOT NULL DEFAULT '9:16'`
+   - `created_at TIMESTAMPTZ`, `updated_at TIMESTAMPTZ`
+
+2. `media`:
+   - `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`
+   - `project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE`
+   - `user_id UUID NOT NULL`
+   - `original_filename TEXT NOT NULL`
+   - `s3_object_key TEXT NOT NULL UNIQUE`
+   - `content_type TEXT NOT NULL`
+   - `declared_size_bytes BIGINT NOT NULL`
+   - `verified_size_bytes BIGINT NULL`
+   - `duration_seconds DOUBLE PRECISION NULL`
+   - `status TEXT NOT NULL CHECK (status IN ('pending', 'uploaded', 'verified', 'failed', 'expired'))`
+   - `expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + INTERVAL '7 days')`
+   - `created_at TIMESTAMPTZ`, `updated_at TIMESTAMPTZ`
+
+3. `analyses`:
+   - `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`
+   - `project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE`
+   - `media_id UUID REFERENCES media(id) ON DELETE CASCADE`
+   - `user_id UUID NOT NULL`
+   - `status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed'))`
+   - `blueprint JSONB NULL`
+   - `created_at TIMESTAMPTZ`, `updated_at TIMESTAMPTZ`
+
+All tables enforce Row Level Security (`auth.uid() = user_id`) so users (including anonymous visitors) cannot access each other's projects, media, or analyses.
+
+## 5. API contract (Phase 1 Implemented)
+
+- `GET /api/health` — health check only; no secrets or diagnostics leaked.
+- `GET /api/projects` — list authenticated user's projects.
+- `POST /api/projects` — create or retrieve the user's active project.
+- `GET /api/projects/{project_id}` — project details, owner scoped.
+- `PATCH /api/projects/{project_id}` — update project name or aspect ratio.
+- `GET /api/projects/{project_id}/media` — list project media assets with temporary authorized preview URLs.
+- `POST /api/projects/{project_id}/media/presign-upload` — validate declared filename/type/size (max 100MB), create pending media record, generate unpredictable S3 key, return presigned PUT URL.
+- `POST /api/projects/{project_id}/media/{media_id}/confirm` — server-side S3 verification via `head_object`, update status to `verified`, record verified size.
+- `GET /api/projects/{project_id}/media/{media_id}/preview-url` — owner-only temporary signed GET download/stream URL (returns 410 Gone if expired).
+- `DELETE /api/projects/{project_id}/media/{media_id}` — owner-only idempotent deletion of S3 object and media record.
+- `POST /api/projects/{project_id}/media/{media_id}/analyze` — initiates video understanding analysis to produce an Editing Blueprint. Requires explicit user consent (`confirmed_baseten_consent: true`), generates short-lived presigned S3 URLs, and dispatches to the configured AI provider.
 
 Use stable typed request/response schemas, request IDs, consistent errors, authentication, CORS allowlist, upload limits, and rate limits. Never accept arbitrary remote URLs for processing.
 
@@ -141,12 +184,31 @@ Current documented base URL: `https://api.meta.ai/v1`; bearer key from the serve
 
 ### Model routing
 
-| Product action | Model/service | Status |
-|---|---|---|
-| Main visual/video understanding | `muse-spark-1.3` | Core |
-| Speech transcription | `muse-voice-transcribe-1.0` | P1, only when speech is relevant |
-| Object masks/tracking | `sam-3.1` | Stretch; only with an object-focus UI |
-| Cover/moodboard image | `muse-image-1.0` | Stretch; explicit user click |
+| Product action | Model/service | Provider | Status |
+|---|---|---|---|
+| Main video understanding & blueprint | `meta-models/muse-spark-open-1026` | Baseten (`https://inference.baseten.co/v1`) | Primary Hackathon Provider ($100 Credits) |
+| Fallback / Offline Testing | `mock-director-1.0` | In-memory Mock Provider | Deterministic baseline (0 credits) |
+| Speech transcription | `muse-voice-transcribe-1.0` | Meta Model API | P1, only when speech is relevant |
+| Object masks/tracking | `sam-3.1` | Meta Model API | Stretch; only with an object-focus UI |
+| Cover/moodboard image | `muse-image-1.0` | Meta Model API | Stretch; explicit user click |
+
+### 7.1 Baseten Provider Adapter Architecture
+
+LolixCopilot integrates Baseten as the primary planned provider for hackathon model inference:
+- **Base URL:** `https://inference.baseten.co/v1`
+- **Model:** `meta-models/muse-spark-open-1026`
+- **Secret Management:** Server-side secret `BASETEN_API_KEY`. The key is never exposed to the client, printed in logs, or included in diagnostics.
+- **Provider Interface Isolation:** `app.services.ai_provider.BaseAIProvider` defines the domain contract (`generate_blueprint`), completely decoupling FastAPI routes and DB storage from Baseten-specific HTTP details.
+- **Request Format:** OpenAI-compatible multimodal chat completions (`POST /v1/chat/completions`) with system instructions, user creative brief text, and `{"type": "video_url", "video_url": {"url": video_url}}`.
+- **Private S3 URLs:** Uses short-lived presigned GET tokens (15-minute TTL). Query string signatures are stripped (`sanitize_url`) from all error logs and exception messages to prevent token leaks.
+- **Structured Output:** Enforces `response_format={"type": "json_object"}`, bounded `max_tokens=2500`, and `temperature=0.2`. Output is strictly validated against `app.schemas.blueprint.EditingBlueprint`.
+- **Bounded Retries & Error Mapping:**
+  - Up to 2 retries with exponential backoff on retryable HTTP errors (`429`, `502`, `503`, `504`) and transport errors.
+  - Non-retryable `401`/`403` maps to `AIAuthenticationError` (502 Bad Gateway to client).
+  - `429` maps to `AIRateLimitError` (429 Too Many Requests to client).
+  - Timeout maps to `AITimeoutError` (504 Gateway Timeout to client).
+  - Malformed JSON / schema mismatch maps to `AIValidationError` (502 Bad Gateway to client).
+- **User Authorization Safeguard:** Footage is never transmitted to Baseten without explicit user consent (`confirmed_baseten_consent: true`), verified at the API boundary (HTTP 400 if omitted).
 
 Do not blindly send every upload through every model. Route only to the service needed for the selected feature.
 

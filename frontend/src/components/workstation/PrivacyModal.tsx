@@ -41,11 +41,13 @@ export function PrivacyModal({ isOpen, onClose }: PrivacyModalProps) {
         <div className="mt-4 space-y-3.5 text-xs leading-relaxed text-[#9ca3af]">
           <div className="rounded-lg border border-[#1f2433] bg-[#07090f] p-3">
             <span className="font-semibold text-[#ffe600]">
-              Meta Model API Terms:
+              Baseten & Meta Model Terms:
             </span>{" "}
-            Content processed while utilizing promotional AI credits may be subject
-            to provider improvement guidelines. Always process authorized,
-            licensed, or non-sensitive source footage.
+            AI video analysis is performed using Baseten (<span className="text-[#f3f4f6] font-mono text-[11px]">https://inference.baseten.co/v1</span>)
+            hosting Meta&apos;s <span className="text-[#ffe600] font-mono text-[11px]">meta-models/muse-spark-open-1026</span>.
+            Source video is accessed only via short-lived private S3 URLs with your explicit authorization.
+            Content processed while utilizing hackathon credits is subject to provider guidelines. Always process
+            authorized, licensed, or non-sensitive source footage.
           </div>
 
           <div className="rounded-lg border border-[#1f2433] bg-[#07090f] p-3">

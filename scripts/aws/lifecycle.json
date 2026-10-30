@@ -1,0 +1,17 @@
+{
+  "Rules": [
+    {
+      "ID": "ExpireUserFootageAfter7Days",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "users/"
+      },
+      "Expiration": {
+        "Days": 7
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+      }
+    }
+  ]
+}
