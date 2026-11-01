@@ -1,3 +1,6 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,6 +10,20 @@ from .routes.health import router as health_router
 from .routes.media import router as media_router
 from .routes.projects import router as projects_router
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Validate application configuration during startup."""
+    active_settings = get_settings()
+    if active_settings.DATABASE_PROVIDER == "supabase":
+        if not active_settings.SUPABASE_URL or not active_settings.SUPABASE_PUBLISHABLE_KEY:
+            raise RuntimeError(
+                "Invalid startup configuration: SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY "
+                "must be configured when DATABASE_PROVIDER is 'supabase'."
+            )
+    yield
+
+
 settings = get_settings()
 
 app = FastAPI(
@@ -15,6 +32,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs" if settings.APP_ENV != "production" else None,
     redoc_url=None,
+    lifespan=lifespan,
 )
 
 # CORS configuration strictly restricted to allowed origins

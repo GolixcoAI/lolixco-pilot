@@ -1,8 +1,12 @@
 import json
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_ENV_FILE = REPO_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -12,7 +16,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=DEFAULT_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -21,7 +25,7 @@ class Settings(BaseSettings):
         default="development",
         description="Environment: development, test, production",
     )
-    ALLOWED_ORIGINS: list[str] = Field(
+    ALLOWED_ORIGINS: list[str] | str = Field(
         default=["http://localhost:3000"],
         description="Allowed CORS origins for web client",
     )
@@ -57,11 +61,19 @@ class Settings(BaseSettings):
         description="Max analyses allowed per user per day in demo mode",
     )
 
-    # External Provider Configs (optional for Phase 0 scaffold & testing)
+    # External Provider Configs
     MODEL_API_KEY: str = Field(default="", description="Meta Model API Key (server-only)")
+    META_BASE_URL: str = Field(
+        default="https://api.meta.ai/v1",
+        description="Meta Model API base URL",
+    )
+    META_MODEL: str = Field(
+        default="muse-spark-1.3",
+        description="Meta Model API model identifier",
+    )
     AI_PROVIDER: str = Field(
         default="mock",
-        description="Active AI provider: 'baseten' or 'mock' (default: mock for credit safety)",
+        description="Active AI provider: 'baseten', 'meta', or 'mock' (default: mock)",
     )
     BASETEN_API_KEY: str = Field(
         default="", description="Baseten API Key for model inference (server-only, never logged)"
@@ -86,7 +98,24 @@ class Settings(BaseSettings):
         le=5,
         description="Max retries on transient errors (429, 502, 503, 504)",
     )
+    USE_MODAL_MEDIA_WORKER: bool = Field(
+        default=False,
+        description="Whether to offload media probing and audio extraction to Modal CPU worker",
+    )
+    MODAL_MEDIA_WORKER_APP: str = Field(
+        default="lolixcopilot-media-worker",
+        description="Modal App name for media processing worker",
+    )
+
+    DATABASE_PROVIDER: str = Field(
+        default="memory",
+        description="Active database provider: 'memory' or 'supabase' (default: memory)",
+    )
     SUPABASE_URL: str = Field(default="", description="Supabase project URL")
+    SUPABASE_PUBLISHABLE_KEY: str = Field(
+        default="",
+        description="Supabase publishable key (anon key) for PostgREST client API requests",
+    )
     SUPABASE_SERVICE_ROLE_KEY: str = Field(default="", description="Supabase service role secret")
     SUPABASE_JWT_SECRET: str = Field(
         default="", description="Supabase JWT secret for symmetric HS256 auth verification"
@@ -103,6 +132,10 @@ class Settings(BaseSettings):
         default="",
         description="Expected JWT issuer claim (e.g. {SUPABASE_URL}/auth/v1)",
     )
+    ALLOW_DEV_TEST_AUTH: bool = Field(
+        default=False,
+        description="Explicit development-only toggle to allow raw UUID test authentication",
+    )
     AWS_REGION: str = Field(default="ap-south-1", description="AWS S3 Region")
     AWS_S3_BUCKET: str = Field(default="", description="Private AWS S3 Bucket Name")
     AWS_ACCESS_KEY_ID: str = Field(default="", description="AWS Access Key ID")
@@ -111,6 +144,28 @@ class Settings(BaseSettings):
     USE_MOCK_STORAGE: bool = Field(
         default=False, description="Explicitly force in-memory mock storage provider"
     )
+
+    @model_validator(mode="after")
+    def validate_database_provider(self) -> "Settings":
+        valid_providers = ("memory", "supabase")
+        if self.DATABASE_PROVIDER not in valid_providers:
+            allowed = ", ".join(repr(p) for p in valid_providers)
+            raise ValueError(
+                f"Invalid DATABASE_PROVIDER '{self.DATABASE_PROVIDER}'. Must be one of: {allowed}"
+            )
+        if self.DATABASE_PROVIDER == "supabase":
+            if not self.SUPABASE_URL or not self.SUPABASE_PUBLISHABLE_KEY:
+                raise ValueError(
+                    "SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY must be configured "
+                    "when DATABASE_PROVIDER is 'supabase'"
+                )
+        valid_ai_providers = ("mock", "baseten", "meta")
+        if self.AI_PROVIDER.lower() not in valid_ai_providers:
+            allowed_ai = ", ".join(repr(p) for p in valid_ai_providers)
+            raise ValueError(
+                f"Invalid AI_PROVIDER '{self.AI_PROVIDER}'. Must be one of: {allowed_ai}"
+            )
+        return self
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod

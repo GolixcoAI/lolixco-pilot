@@ -300,8 +300,45 @@ def test_verify_jwt_empty_token() -> None:
     assert exc.value.status_code == 401
 
 
-def test_verify_raw_dev_test_identifier_without_secret() -> None:
+def test_verify_raw_test_identifier_in_test_env() -> None:
     user_id = str(uuid.uuid4())
     settings = Settings(SUPABASE_JWT_SECRET="", APP_ENV="test")
     user = verify_supabase_jwt(user_id, settings)
     assert user.user_id == user_id
+    assert user.access_token == user_id
+
+
+def test_verify_raw_uuid_rejected_in_development_by_default() -> None:
+    user_id = str(uuid.uuid4())
+    settings = Settings(
+        SUPABASE_JWT_SECRET="secret",
+        APP_ENV="development",
+        ALLOW_DEV_TEST_AUTH=False,
+    )
+    with pytest.raises(HTTPException) as exc:
+        verify_supabase_jwt(user_id, settings)
+    assert exc.value.status_code == 401
+
+
+def test_verify_raw_uuid_accepted_in_development_when_explicitly_enabled() -> None:
+    user_id = str(uuid.uuid4())
+    settings = Settings(
+        SUPABASE_JWT_SECRET="",
+        APP_ENV="development",
+        ALLOW_DEV_TEST_AUTH=True,
+    )
+    user = verify_supabase_jwt(user_id, settings)
+    assert user.user_id == user_id
+    assert user.access_token == user_id
+
+
+def test_verify_raw_uuid_rejected_in_production_even_if_flag_set() -> None:
+    user_id = str(uuid.uuid4())
+    settings = Settings(
+        SUPABASE_JWT_SECRET="secret",
+        APP_ENV="production",
+        ALLOW_DEV_TEST_AUTH=True,
+    )
+    with pytest.raises(HTTPException) as exc:
+        verify_supabase_jwt(user_id, settings)
+    assert exc.value.status_code == 401

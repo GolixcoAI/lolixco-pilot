@@ -8,6 +8,8 @@ import {
   getPreviewUrl,
   uploadFileToS3,
   analyzeMedia,
+  getLatestAnalysis,
+  submitAnalysisFeedback,
 } from "./mediaApi";
 
 describe("Media API client", () => {
@@ -181,6 +183,84 @@ describe("Media API client", () => {
     const body = JSON.parse(lastCall[1]?.body as string);
     expect(body.confirmed_baseten_consent).toBe(true);
     expect(body.brief.title).toBe("Test Cut");
+  });
+
+  it("sends meta provider selection when requested", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "analysis-meta-1",
+        provider: "meta",
+        model: "muse-spark-1.3",
+        blueprint: { title: "Meta Cut", duration: 15, target_aspect_ratio: "9:16", style_notes: "", moments: [], caveats: [] },
+        created_at: new Date().toISOString(),
+      }),
+    } as Response);
+
+    const res = await analyzeMedia(
+      "proj-123",
+      "media-1",
+      { title: "Meta Cut", description: "Desc", style: "Anime", pacing: "fast", aspectRatio: "9:16", targetDuration: 15 },
+      true,
+      "meta",
+    );
+
+    expect(res.provider).toBe("meta");
+    const lastCall = vi.mocked(global.fetch).mock.calls[0];
+    const body = JSON.parse(lastCall[1]?.body as string);
+    expect(body.provider).toBe("meta");
+  });
+
+  it("fetches latest analysis or returns null on 404", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "analysis-latest",
+        provider: "baseten",
+        source_identification: { likely_title: "Jujutsu Kaisen", confidence: "high" },
+      }),
+    } as Response);
+
+    const data = await getLatestAnalysis("proj-123", "media-1");
+    expect(data?.id).toBe("analysis-latest");
+
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+    } as Response);
+
+    const missing = await getLatestAnalysis("proj-123", "media-no-analysis");
+    expect(missing).toBeNull();
+  });
+
+  it("submits user feedback and corrections successfully", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "analysis-latest",
+        user_feedback: {
+          confirmed_by_user: false,
+          corrected_source_title: "Chainsaw Man",
+          corrected_song_title: "Kick Back",
+        },
+      }),
+    } as Response);
+
+    const res = await submitAnalysisFeedback(
+      "proj-123",
+      "media-1",
+      {
+        confirmed_by_user: false,
+        corrected_source_title: "Chainsaw Man",
+        corrected_song_title: "Kick Back",
+      },
+      "analysis-latest",
+    );
+
+    expect(res.user_feedback?.corrected_source_title).toBe("Chainsaw Man");
+    const lastCall = vi.mocked(global.fetch).mock.calls[0];
+    expect(lastCall[0]).toContain("analysis_id=analysis-latest");
   });
 
   it("handles analysis error when server rejects request", async () => {

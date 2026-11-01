@@ -1,6 +1,6 @@
 # Implementation Status
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-02
 **Release target:** Meta Global AI Developer Hackathon, November 4, 2026.
 **Product:** LolixCopilot (`GolixcoAI/lolixco-pilot`)
 **Tagline:** From raw footage to a stronger cut.
@@ -157,6 +157,169 @@ Strict preservation of all available developer credits:
   - Automatic deployment: initially disabled.
   - GitHub 403 Root Cause Documented: Local HTTPS push failed because user `Golixco` lacked collaborator write access to org repo `GolixcoAI/lolixco-pilot`. Resolution paths provided (invite collaborator, update PAT scopes, or SSH key).
 
+### Phase 1.7: Muse Open Research & Local Environment Preparation
+- **Meta Hackathon Muse Experiments Synthesis (`docs/research/MUSE_EXPERIMENTS_NOTES.md`):**
+  - Synthesized empirical results from Sinan Ozdemir's research: Muse Spark Open beats DeepSeek V4.1 Flash on short-answer reasoning (+2.0% pass@1); peaks at `reasoning_effort="low"` (88.5%); rejects `"none"`; and suffers token truncation at `"high"` / `"max"` (19 of 400 empty answers at max).
+  - Designed proposed future Video Blueprint Benchmark (VBB) with temporal IoU and pacing compliance scoring.
+  - Postponed Glimmer LoRA routing and persistent GPU deployments to preserve hackathon funds.
+- **Baseten Multimodal Audit:**
+  - Verified video limit: up to 2 videos per request, max 300s, max 200 MB, max 96 sampled frames.
+  - Identified critical multimodal constraint: Muse Spark Open video encoder ignores the video audio track. Future audio extraction pipeline planned with dual `video_url` + `audio_url` ingestion.
+### Phase 1.8: Real Supabase PostgREST Repository Integration
+- **PostgREST Client & Architecture (`backend/app/db/supabase_repo.py`):**
+  - Implemented `SupabaseRepository(BaseRepository)` communicating directly with Supabase PostgREST REST API via `httpx.Client`.
+  - Zero unnecessary SDK dependencies added.
+  - Implemented all `BaseRepository` methods:
+    - **Projects:** `get_project`, `list_projects`, `create_project`, `get_or_create_default_project`, `update_project`.
+    - **Media:** `create_media`, `get_media`, `list_media`, `update_media_status`, `delete_media`.
+  - Added typed domain exceptions: `DatabaseError`, `DatabaseConnectionError`, `DatabasePermissionError`, `DatabaseRecordNotFoundError`.
+  - Context manager and `close()` lifecycle ensures connection cleanup with `finally: client.close()`.
+- **Request-Scoped Authentication & Isolation:**
+  - Instantiated per request inside `get_repository` using verified `AuthenticatedUser.access_token` and `SUPABASE_PUBLISHABLE_KEY`.
+  - PostgREST headers: `apikey: <SUPABASE_PUBLISHABLE_KEY>`, `Authorization: Bearer <USER_JWT>`, `Prefer: return=representation`.
+  - User ID strictly scoped to `auth.uid() = user_id` derived from verified JWT.
+  - Never shares mutable clients or cached tokens across requests or users.
+- **Fail-Closed Guarantees:**
+  - Missing Supabase URL or publishable key when `DATABASE_PROVIDER=supabase` raises clear startup error (`RuntimeError`).
+  - Database errors bubble up as typed domain exceptions; never silently falls back to `InMemoryRepository`.
+  - Credentials and access tokens are strictly sanitized and never logged.
+- **Frontend & Backend Authentication Hardening:**
+  - `frontend/src/lib/supabase.ts`: Replaced silent fallback on `signInAnonymously()` error with clear Error throw; local anonymous identity fallback restricted behind `NEXT_PUBLIC_ALLOW_LOCAL_AUTH_FALLBACK=true` (development only, completely blocked in production).
+  - `backend/app/auth.py`: Raw UUID authentication rejected by default in all environments including development. Test shortcut restricted to `APP_ENV="test"` or `ALLOW_DEV_TEST_AUTH=true` (strictly rejected in production).
+- **Validation Results:**
+  - Frontend: 27/27 tests passed (`vitest`), ESLint 0 errors, TypeScript 0 errors (`tsc --noEmit`), Next.js Turbopack build succeeded.
+  - Backend: 100/100 tests passed (`pytest`), Ruff lint 0 errors, Ruff format 0 errors (30 files formatted), Mypy 0 errors across 30 source files.
+  - Root verification: `npm run check:all` passed with 0 errors.
+
+### Phase 2: Real S3 Video Pipeline, Dual Provider Adapters & Media Intelligence (Phases A–H)
+- **Phase A — S3 Video Upload Lifecycle & Server-Side Verification:**
+  - Browser direct-to-S3 upload via authenticated presigned PUT URLs with real progress tracking.
+  - Server-side verification on `POST .../confirm`: checks object existence via S3 `head_object`, validates byte size (<= 100 MB, rejects 0-byte objects), verifies MIME type (`video/*`), checks duration (<= 60s), and guarantees idempotent confirmation.
+  - 7-day retention policy: S3 lifecycle rule plus database-level `expires_at` enforcement (returns 410 Gone for expired assets).
+  - Safe, idempotent deletion from both S3 and Supabase.
+- **Phase B — Dual Provider Adapters (Baseten & Meta Model API):**
+  - Unified `BaseAIProvider` interface with strict response validation against `EditingBlueprint` and media intelligence schemas.
+  - `BasetenProvider`: OpenAI-compatible `POST /v1/chat/completions` at `https://inference.baseten.co/v1` for `meta-models/muse-spark-open-1026`. Multimodal payload supports `video_url` and `audio_url`. Records token usage and latency.
+  - `MetaProvider`: Official Meta Responses API (`POST /v1/responses`) with chat completions fallback for `muse-spark-1.3`. Decoupled `MODEL_API_KEY` and base URL. Gracefully reports configuration required if key is missing while allowing Baseten to operate.
+  - Error mapping: 401/403 (Auth), 429 (Rate Limit), 503 (Unavailable), 504 (Timeout), malformed JSON handling.
+  - `MockAIProvider`: Zero-credit deterministic test harness.
+- **Phase C — Media Intelligence Feature ("Identify source, characters & soundtrack"):**
+  - Source identification: Classification (`anime`, `movie`, `tv_series`, `game`, `music_video`, `other`, `unknown`), likely title, franchise, characters, visual evidence, confidence rating (`high`, `medium`, `low`, `speculative`).
+  - Audio & soundtrack intelligence: Song title, artist, match status (`confirmed_fingerprint`, `strong_inference`, `possible_match`, `unknown`), musical genre, tempo, mood, and transition cues.
+  - Acoustic fingerprinting interface: `BaseMusicFingerprintProvider` abstract contract prepared for ACRCloud or specialist integrations.
+  - Editing suggestions integrated directly into `EditingBlueprint` timeline schema.
+- **Phase D — Audio/Video Processing Architecture:**
+  - `media_processing.py`: `BaseMediaProcessingService`, `LocalMediaProcessingService` (with graceful fallback if ffprobe/ffmpeg absent), `MockMediaProcessingService`.
+  - Bounded 16kHz mono WAV extraction preserving private S3 storage.
+  - Modal-ready interface designed for serverless CPU worker offloading.
+- **Phase E — AI Director & Workstation Interface:**
+  - Contextual suggestion banner: "Video uploaded. Want me to identify the source, characters, and soundtrack?" with explicit CTA.
+  - Provider selector toggle: Switch between Baseten (`muse-spark-open`) and Meta AI (`muse-spark-1.3`).
+  - Structured media intelligence display with confidence badges, character chips, and soundtrack metadata.
+  - In-app user feedback & correction flow: allows editors to confirm accuracy or submit title/song corrections, stored as structured feedback.
+- **Phase F — Cost Protection & Privacy:**
+  - Explicit user authorization checkbox required before any model inference is executed.
+  - Idempotency & caching: duplicate requests for identical media ID and brief parameters within TTL return cached analysis without re-billing.
+  - Bounded token limits (`max_tokens=2500` to `3500`) and conservative 60s / 100MB media limits.
+  - Zero billable calls executed during automated test runs.
+- **Phase G — Database Persistence:**
+  - Forward-only migration: `supabase/migrations/20261101180000_media_intelligence_and_analyses_persistence.sql`.
+  - Added columns to `analyses`: `provider`, `model`, `source_identification`, `audio_intelligence`, `usage_metadata`, `user_feedback`, with performance indexes.
+  - Implemented `create_analysis`, `get_analysis`, `get_latest_analysis_for_media`, and `update_analysis_feedback` across `BaseRepository`, `InMemoryRepository`, and `SupabaseRepository`.
+  - Added REST endpoints: `GET .../media/{id}/analyze/latest` and `POST .../media/{id}/analyze/feedback`.
+- **Phase H — Automated Testing & Verification:**
+  - Backend: **122 / 122 tests passed** (`pytest` in 5.89s)
+    - `test_analysis_intelligence.py` (4 passed)
+    - `test_baseten_provider.py` (17 passed)
+    - `test_meta_provider.py` (9 passed)
+    - `test_media_processing.py` (4 passed)
+    - `test_projects_media.py` (15 passed)
+    - `test_supabase_repo.py` (21 passed)
+    - `test_s3_service.py` (12 passed)
+    - `test_auth.py` (18 passed)
+    - `test_config.py` (11 passed)
+    - `test_blueprint_schema.py` (5 passed)
+    - `test_migration_sql.py` (4 passed)
+    - `test_health.py` (2 passed)
+  - Backend Lint & Types:
+    - `.venv/bin/ruff check backend workers training scripts` -> All checks passed!
+    - `.venv/bin/mypy --explicit-package-bases backend/app backend/tests workers training scripts` -> Success: no issues found in 46 source files.
+  - Frontend: **30 / 30 tests passed** (`vitest` in 0.88s)
+    - `mediaApi.test.ts` (12 passed): Includes `analyzeMedia` with Baseten/Meta, `getLatestAnalysis`, `submitAnalysisFeedback`.
+    - `timecode.test.ts` (9 passed), `supabase.test.ts` (7 passed), `config.test.ts` (2 passed).
+  - Frontend Lint & Types:
+    - `npm run lint:frontend` -> 0 errors, 0 warnings.
+    - `npm run type-check:frontend` -> 0 errors (`tsc --noEmit`).
+    - `npm run build:frontend` -> Next.js Turbopack production build succeeded with exit code 0.
+  - Controlled Live Smoke-Test Script:
+    - `scripts/smoke_test_inference.py`: CLI taking `--provider [baseten|meta]`, requiring explicit typed confirmation ('RUN') before executing 1 bounded live call.
+
+### Phase I: Modal Media Worker & Muse Glimmer 30B QLoRA Training Pipeline
+- **Modal Skills Discovered & Used:**
+  - Skill path: `.agents/skills/modal/` (v1.6.3). Followed official patterns for `modal.App`, `modal.Image.debian_slim()`, `modal.Volume.from_name()`, `modal.Retries()`, `modal.Function.lookup()`, `.aio()` async execution, and ephemeral local entrypoints.
+- **CPU Media Worker (`workers/media_worker.py`):**
+  - Standalone Modal App `lolixcopilot-media-worker` configured with Debian slim image, `ffmpeg`, and `boto3`.
+  - Functions: `probe_video_metadata`, `extract_audio_track` (16kHz mono WAV), `extract_timestamped_frames` (WebP thumbnails), and `extract_scene_keyframes`.
+  - Presigned S3 integration: downloads source clip via presigned GET, performs bounded FFmpeg operations in ephemeral temporary directory, uploads derivatives via presigned PUT.
+  - Modular pure helpers (`execute_ffprobe`, `execute_audio_extraction`, etc.) enabling 100% mocked offline testing without spawning cloud containers.
+- **Backend Service Adapter (`backend/app/services/modal_media_service.py`):**
+  - Implements `BaseMediaProcessingService`. Seamlessly switches between local FFmpeg and Modal remote functions via `USE_MODAL_MEDIA_WORKER` feature flag.
+  - Automatic fallback to local processing if remote Modal worker fails or is unreachable.
+- **Muse Glimmer 30B QLoRA Training Pipeline (`training/`):**
+  - Axolotl configuration (`training/configs/muse_glimmer_30b_qlora.yml`): 4-bit NF4 quantization, LoRA rank 16 / alpha 32, sequence length 4096, micro-batch 1, gradient accumulation 8, `paged_adamw_8bit`. Runs on a single H100 80GB GPU.
+  - Dataset specification & loader (`training/dataset.py`): Pydantic models enforcing temporal bounds (`0 <= start < peak < end <= duration`), ChatML instruction conversion, and seed dataset with positive fight clips and hard negative distractors.
+  - Metrics evaluator (`training/evaluate.py`): Measures temporal Intersection over Union (tIoU@0.30, 0.50, 0.75), peak frame alignment error (<0.50s threshold), and classification accuracy.
+  - Resumable Modal trainer (`training/train_glimmer_qlora.py`): Attaches persistent `modal.Volume("lolixcopilot-checkpoints")`, binds `huggingface-secret` for `HF_TOKEN`, uses `modal.Retries(max_retries=10)` for preemption resilience, and provides standalone CLI entrypoint (`--help`, `--dry-run`) with structured PASS/FAIL reporting across 13 checks.
+- **Credit & Cost Model (`docs/MODAL_CREDIT_AND_TRAINING_SPEC.md`):**
+  - Total planned spend: **$11.57** (~11.6% of $100 credit pool), preserving **$88.43** buffer.
+  - CPU Worker: ~$0.0012 per 60s video (1,000 runs = ~$1.22).
+  - H100 80GB Training: $3.95/hr x 2 hrs = $7.90 for a 3-epoch QLoRA run.
+  - Checkpoint storage volume: $0.15/GB-mo (~$2.45).
+- **Automated Test Results:**
+  - Backend: **172 / 172 tests passed** (including 30 training pipeline, volume state, dataset, manifest, and evaluation tests; 11 Modal worker tests; 16 S3 tests; 20 Supabase repo tests).
+  - Frontend: **30 / 30 tests passed** (`vitest`).
+  - Frontend Types: `tsc --noEmit` passed.
+  - All linting (Ruff: 43 files passed) and type checks (Mypy: 43 files passed) clean.
+  - Git Diff Check: `git diff --check` passed cleanly with 0 whitespace or formatting issues.
+
+### Phase J: Modal Preflight & Muse Glimmer Multimodal Preparation
+- **Live Remote CPU Preflight Execution (`training/modal_preflight.py`):**
+  - Completed in **0.35 seconds** CPU execution time in a remote Debian slim container (`ap-i8v0okYNBc7uW0gbQUWtlf`).
+  - Secret `HF_TOKEN` detected in container environment (protected, never displayed).
+  - Authenticated Hugging Face identity confirmed as user `'Golixco'`.
+  - Authenticated model access to `meta-models/Muse-Glimmer-30B` confirmed as `AUTHORIZED` (commit SHA: `cec94fcfd6...`, verified config/safetensors files).
+  - Checkpoint volume `lolixcopilot-checkpoints` verified as `MISSING` (checked safely via SDK without creating, preserving resources).
+- **Multimodal Training Compatibility & Isolation:**
+  - ViT-G/14 vision perception encoder (~1.8B params) is **FROZEN** (`freeze_vision_tower: true`).
+  - Trainable parameters isolated to LoRA adapters ($r=16, \alpha=32$) on attention projections (`q_proj`, `k_proj`, `v_proj`, `o_proj`), SwiGLU MLP (`gate_proj`, `up_proj`, `down_proj`), and `multi_modal_projector`.
+  - Enforced `sample_packing: false` and `eval_sample_packing: false` to prevent 2D spatial pixel token corruption.
+  - Multi-image data formatted in OpenAI Messages schema with typed `{"type": "image", "path": ...}` blocks.
+  - Hardware profile: single NVIDIA H100 (80GB SXM5) requires ~32.5 GB peak VRAM in 4-bit NF4 QLoRA (~$7.90 for a 2.0h run at $3.95/hr).
+- **Dataset Preparation & Multi-Image Validation (`training/dataset.py`):**
+  - Strict temporal ordering enforced: $0 \le \text{start} < \text{peak} < \text{end} \le \text{duration}$.
+  - Image assets verified for physical existence, chronological timestamp ordering, dimensions, and SHA-256 integrity (supports PNG, JPEG, and WebP).
+  - Pure binary header parsers for JPEG and WebP avoid heavy image library runtime dependencies.
+  - Reproducible manifest generation (`train_manifest.jsonl`, `val_manifest.jsonl`, `test_manifest.jsonl`, `eval_manifest.json`, `manifest_metadata.json`) with zero leakage across video/episode IDs.
+  - Honest dataset accounting: explicitly distinguishes 7 synthetic seed fixture samples from genuine production data.
+- **Dry-Run Validation Pipeline & Cloud Volume Separation (`training/train_glimmer_qlora.py`):**
+  - Corrected volume reporting: distinguished configured volume (`Modal Checkpoint Volume Configuration`: `[PASS]`) from cloud presence (`Modal Checkpoint Volume Provisioning`: `[NOT PROVISIONED]`).
+  - Separate local validation from remote readiness: local checks pass (19 / 19, `LOCAL_PASSED`), while remote training status is reported as `LOCAL_READY_REMOTE_BLOCKED`.
+  - Preserved offline dry-run (returns code 0 when local validation passes).
+  - Explicit guard blocks `--run-training` from launching remote jobs until the volume is provisioned via `modal volume create lolixcopilot-checkpoints`.
+  - Unit tests added for both missing volume state (`LOCAL_READY_REMOTE_BLOCKED`) and provisioned volume state (`READY`).
+  - Local Python 3.13 venv isolated as lightweight orchestrator; GPU dependencies (`torch`, `transformers`, `peft`, `bitsandbytes`) safely isolated in remote container image specification.
+- **Advanced Evaluation Suite (`training/evaluate.py`):**
+  - Added Precision, Recall, F1, False Positive Rate (FPR), and category-level confusion matrices for positive combat, negative distractors, unrelated combat, and ambiguous clips.
+  - Added baseline vs adapted model comparison asserting that training loss alone is insufficient proof of event adaptation.
+
+## Zero-Credit-Consumption Protection Status
+
+Strict preservation of all available developer credits:
+- **Baseten ($100 Hackathon Credits):** 0 billable calls in automated tests (mock HTTP transport used).
+- **Meta Model API ($150 Credits):** 0 billable calls in automated tests (mock HTTP transport used).
+- **Modal ($100 Credits):** 0 billable calls, 0 cloud containers spawned in automated tests.
+- **AWS ($120 Credits):** 0 billable data transfers in automated tests (mock storage used).
+
 ## Manual Setup / Approvals Required
 
 See `docs/PHASE1_SETUP.md` for full instructions.
@@ -164,26 +327,23 @@ See `docs/PHASE1_SETUP.md` for full instructions.
 ### 1. Baseten Inference Configuration
 - Model: `meta-models/muse-spark-open-1026`
 - Base URL: `https://inference.baseten.co/v1`
-- Configure in `.env`:
-  ```bash
-  AI_PROVIDER=baseten
-  BASETEN_API_KEY=your_baseten_api_key_here
-  ```
-- *Note: Leave `AI_PROVIDER=mock` until ready to perform a separate, carefully controlled first smoke test.*
+- Variable present: `BASETEN_API_KEY` configured.
 
-### 2. AWS S3 Storage (Completed & Verified)
+### 2. Meta Model API Configuration
+- Model: `muse-spark-1.3`
+- Base URL: `https://api.meta.ai/v1`
+- Variable: `MODEL_API_KEY` (optional; if not set, system works with Baseten).
+
+### 3. AWS S3 Storage (Completed & Verified)
 - Dedicated Bucket: `lolixcopilot-media-247673029886-ap-south-1`
 - Region: `ap-south-1`
 - Configuration: Private, SSE-S3 encrypted, restricted CORS, 7-day auto-expiration on `users/`.
 
-### 3. Supabase Setup & GitHub Integration
+### 4. Supabase Setup & Pending Migration
 - Project Reference: `fhfkjviishfvfyawfckh` (Singapore `ap-southeast-1`).
-- Enable Anonymous Sign-ins in Authentication > Providers.
-- Migration in source control: `supabase/migrations/20261030160559_phase1_projects_and_media.sql`.
-- In Supabase Dashboard: Link GitHub repository `GolixcoAI/lolixco-pilot`, working directory `.`, branch `main` with automatic deployment initially disabled.
-- Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_JWT_SECRET` (if using HS256).
+- Pending Migration: `supabase/migrations/20261101180000_media_intelligence_and_analyses_persistence.sql` ready to apply via Supabase CLI or Dashboard SQL editor when user is ready.
 
-## Next Milestone
-
-- **Controlled Smoke Test:** Execute single live Baseten inference test using a short (5-10s) test clip to verify token consumption and live model latency.
-- **Phase 2:** Modal serverless media processing worker with `ffprobe` metadata inspection, server-side duration enforcement (<= 60s), and representative thumbnail extraction.
+### 5. Modal Workers & Training (Ready for Deployment when Authorized)
+- Deploy CPU Media Worker: `modal deploy workers/media_worker.py` (free until jobs invoked; ~$0.0012 per video).
+- Run Training Offline Dry-Run: `python training/train_glimmer_qlora.py --dry-run` (0 credits).
+- Launch Modal Training (Only when weights & dataset ready): `modal run training/train_glimmer_qlora.py` (resumable, H100 80GB).

@@ -14,14 +14,26 @@ import {
   INITIAL_DEMO_CLIPS,
   INITIAL_KEY_MOMENTS,
 } from "@/lib/mockData";
-import { CreativeBriefState, KeyMoment, MediaClip, MomentTag } from "@/types/workstation";
+import {
+  AIProviderName,
+  AudioIntelligenceData,
+  CreativeBriefState,
+  KeyMoment,
+  MediaClip,
+  MomentTag,
+  SourceIdentificationData,
+  UsageMetadataData,
+  UserFeedbackData,
+} from "@/types/workstation";
 import {
   analyzeMedia,
   confirmUpload,
   deleteMedia,
+  getLatestAnalysis,
   getOrCreateProject,
   listProjectMedia,
   requestPresignedUpload,
+  submitAnalysisFeedback,
   uploadFileToS3,
 } from "@/lib/mediaApi";
 import { formatTimecode } from "@/lib/timecode";
@@ -48,6 +60,16 @@ export default function WorkstationPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStage, setGenerationStage] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  // Multimodal Media Intelligence & Provider state
+  const [selectedProvider, setSelectedProvider] = useState<AIProviderName>("baseten");
+  const [sourceIntelligence, setSourceIntelligence] =
+    useState<SourceIdentificationData | null>(null);
+  const [audioIntelligence, setAudioIntelligence] =
+    useState<AudioIntelligenceData | null>(null);
+  const [usageMetadata, setUsageMetadata] = useState<UsageMetadataData | null>(null);
+  const [userFeedback, setUserFeedback] = useState<UserFeedbackData | null>(null);
+  const [activeAnalysisId, setActiveAnalysisId] = useState<string | null>(null);
 
   // Modal dialog state
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
@@ -308,11 +330,15 @@ export default function WorkstationPage() {
     [clips, projectId, activeClipId],
   );
 
-  // Video understanding blueprint generation with Baseten or local mock fallback
-  const handleGenerateBlueprint = async (confirmedBasetenConsent: boolean) => {
-    if (!confirmedBasetenConsent) {
+  // Video understanding blueprint generation with Baseten/Meta or local mock fallback
+  const handleGenerateBlueprint = async (
+    confirmedConsent: boolean,
+    provider?: AIProviderName,
+  ) => {
+    const activeProvider = provider || selectedProvider;
+    if (!confirmedConsent) {
       setAnalysisError(
-        "User authorization required: please check the box to authorize Baseten AI analysis.",
+        `User authorization required: please authorize ${activeProvider === "meta" ? "Meta AI" : "Baseten"} model analysis.`,
       );
       return;
     }
@@ -323,8 +349,24 @@ export default function WorkstationPage() {
 
     try {
       if (activeClip?.isRealUpload && projectId && activeClipId && !activeClipId.startsWith("upload-")) {
-        setGenerationStage("Understanding scenes with Baseten...");
-        const res = await analyzeMedia(projectId, activeClipId, brief, confirmedBasetenConsent);
+        setGenerationStage(
+          activeProvider === "meta"
+            ? "Understanding scenes with Meta AI (muse-spark-1.3)..."
+            : "Understanding scenes with Baseten (muse-spark-open)...",
+        );
+        const res = await analyzeMedia(
+          projectId,
+          activeClipId,
+          brief,
+          confirmedConsent,
+          activeProvider,
+        );
+
+        setActiveAnalysisId(res.id);
+        setSourceIntelligence(res.source_identification || null);
+        setAudioIntelligence(res.audio_intelligence || null);
+        setUsageMetadata(res.usage_metadata || null);
+        setUserFeedback(res.user_feedback || null);
 
         setGenerationStage("Building blueprint...");
         if (res.blueprint && res.blueprint.scenes) {
@@ -368,6 +410,69 @@ export default function WorkstationPage() {
       setGenerationStage(null);
     }
   };
+
+  const handleFeedbackSubmit = async (feedback: {
+    confirmed_by_user: boolean;
+    corrected_source_title?: string | null;
+    corrected_song_title?: string | null;
+    notes?: string | null;
+  }) => {
+    if (!projectId || !activeClipId || activeClipId.startsWith("upload-")) return;
+    try {
+      const res = await submitAnalysisFeedback(
+        projectId,
+        activeClipId,
+        feedback,
+        activeAnalysisId || undefined,
+      );
+      setUserFeedback(res.user_feedback || null);
+    } catch (err) {
+      console.error("Failed to submit feedback:", err);
+    }
+  };
+
+  // Restore latest persistent analysis when active clip changes
+  useEffect(() => {
+    let isCurrent = true;
+    if (activeClip?.isRealUpload && projectId && activeClipId && !activeClipId.startsWith("upload-")) {
+      getLatestAnalysis(projectId, activeClipId)
+        .then((latest) => {
+          if (!isCurrent) return;
+          if (latest) {
+            setActiveAnalysisId(latest.id);
+            setSourceIntelligence(latest.source_identification || null);
+            setAudioIntelligence(latest.audio_intelligence || null);
+            setUsageMetadata(latest.usage_metadata || null);
+            setUserFeedback(latest.user_feedback || null);
+          } else {
+            setActiveAnalysisId(null);
+            setSourceIntelligence(null);
+            setAudioIntelligence(null);
+            setUsageMetadata(null);
+            setUserFeedback(null);
+          }
+        })
+        .catch(() => {
+          // Safe non-blocking fallback if no previous analysis
+        });
+    } else {
+      const timer = setTimeout(() => {
+        if (!isCurrent) return;
+        setActiveAnalysisId(null);
+        setSourceIntelligence(null);
+        setAudioIntelligence(null);
+        setUsageMetadata(null);
+        setUserFeedback(null);
+      }, 0);
+      return () => {
+        isCurrent = false;
+        clearTimeout(timer);
+      };
+    }
+    return () => {
+      isCurrent = false;
+    };
+  }, [activeClipId, activeClip?.isRealUpload, projectId]);
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#050505] text-[#ffffff] font-sans">
@@ -431,6 +536,14 @@ export default function WorkstationPage() {
           generationStage={generationStage}
           analysisError={analysisError}
           onDismissError={() => setAnalysisError(null)}
+          selectedProvider={selectedProvider}
+          onSelectProvider={setSelectedProvider}
+          sourceIntelligence={sourceIntelligence}
+          audioIntelligence={audioIntelligence}
+          usageMetadata={usageMetadata}
+          userFeedback={userFeedback}
+          onFeedbackSubmit={handleFeedbackSubmit}
+          hasUploadedVideo={Boolean(activeClip?.isRealUpload)}
         />
       </div>
 

@@ -1,6 +1,7 @@
 """FastAPI routes for media asset upload, verification, and authorized playback."""
 
 import os
+import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -108,25 +109,23 @@ async def request_presigned_upload(
             detail=f"Unsupported media file extension '{ext}'. Allowed extensions: {allowed}",
         )
 
-    # Generate temporary media placeholder to bind ID
+    media_id = str(uuid.uuid4())
+    s3_key = storage.generate_object_key(
+        user_id=user.user_id,
+        project_id=project_id,
+        media_id=media_id,
+        extension=ext,
+    )
     media_record = repo.create_media(
         project_id=project_id,
         user_id=user.user_id,
         original_filename=payload.filename,
-        s3_object_key="pending",
+        s3_object_key=s3_key,
         content_type=payload.content_type,
         declared_size_bytes=payload.size_bytes,
         retention_days=settings.VIDEO_RETENTION_DAYS,
+        media_id=media_id,
     )
-
-    # Generate unpredictable scoped key
-    s3_key = storage.generate_object_key(
-        user_id=user.user_id,
-        project_id=project_id,
-        media_id=media_record.id,
-        extension=ext,
-    )
-    media_record.s3_object_key = s3_key
 
     upload_info = storage.create_presigned_upload_url(
         s3_key=s3_key,
@@ -151,8 +150,13 @@ async def confirm_upload(
     user: AuthenticatedUser = Depends(get_current_user),
     repo: BaseRepository = Depends(get_repository),
     storage: BaseStorageService = Depends(get_storage),
+    settings: Settings = Depends(get_settings),
 ) -> MediaResponse:
-    """Verify upload completion directly against storage metadata."""
+    """Verify upload completion directly against storage metadata.
+
+    Performs server-side existence, size, and content-type verification.
+    Guarantees idempotency on repeated confirmations.
+    """
     project = repo.get_project(project_id, user.user_id)
     if not project:
         raise HTTPException(
@@ -167,7 +171,7 @@ async def confirm_upload(
             detail="Media asset not found or access denied",
         )
 
-    # Verify S3 object exists and check size
+    # Verify S3 object exists and retrieve verified size and content type
     obj_meta = storage.verify_object(media.s3_object_key)
     if not obj_meta.exists:
         repo.update_media_status(media_id, user.user_id, status="failed")
@@ -176,13 +180,52 @@ async def confirm_upload(
             detail="Uploaded object was not found in storage. Upload may have timed out or failed.",
         )
 
+    # 1. Enforce verified byte size limit
+    if obj_meta.size_bytes > settings.MAX_UPLOAD_BYTES:
+        repo.update_media_status(media_id, user.user_id, status="failed")
+        max_mb = settings.MAX_UPLOAD_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Verified object size ({obj_meta.size_bytes} bytes) exceeds {max_mb} MB limit",
+        )
+
+    if obj_meta.size_bytes == 0:
+        repo.update_media_status(media_id, user.user_id, status="failed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded object is empty (0 bytes).",
+        )
+
+    # 2. Enforce content-type validity if present
+    if obj_meta.content_type:
+        raw_ct = obj_meta.content_type.lower().split(";")[0].strip()
+        allowed_mime_prefixes = ("video/", "application/octet-stream")
+        if not raw_ct.startswith(allowed_mime_prefixes):
+            repo.update_media_status(media_id, user.user_id, status="failed")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Uploaded object has invalid MIME type '{raw_ct}'. Must be video.",
+            )
+
+    # 3. Enforce maximum video length if duration is supplied
     duration = payload.duration_seconds if payload else None
+    if duration is not None and duration > settings.MAX_VIDEO_SECONDS:
+        repo.update_media_status(media_id, user.user_id, status="failed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Video duration ({duration:.1f}s) exceeds maximum allowed length of "
+                f"{settings.MAX_VIDEO_SECONDS}s"
+            ),
+        )
+
+    # 4. Idempotent update
     updated = repo.update_media_status(
         media_id=media_id,
         user_id=user.user_id,
         status="verified",
         verified_size_bytes=obj_meta.size_bytes,
-        duration_seconds=duration,
+        duration_seconds=duration if duration is not None else media.duration_seconds,
     )
     if not updated:
         raise HTTPException(

@@ -34,11 +34,13 @@ temp/
 *.jpg
 *.jpeg
 *.png
+*.webp
 !frontend/public/brand/**
 !docs/reference/**
 
-# OS / editor
+# OS / editor / agent skills
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+.agents/

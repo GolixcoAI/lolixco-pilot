@@ -1,7 +1,15 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.config import DEFAULT_ENV_FILE, REPO_ROOT, Settings
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure config unit tests evaluate clean class defaults independent of ambient .env files."""
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
 
 
 def test_default_settings() -> None:
@@ -18,7 +26,9 @@ def test_default_settings() -> None:
 
 def test_cors_origin_parsing_comma_separated() -> None:
     """Verify comma-separated origins string parses into list."""
-    settings = Settings(ALLOWED_ORIGINS="http://localhost:3000, https://editor.lolixco.com")  # type: ignore[arg-type]
+    settings = Settings(
+        ALLOWED_ORIGINS="http://localhost:3000, https://editor.lolixco.com",
+    )
     assert settings.ALLOWED_ORIGINS == ["http://localhost:3000", "https://editor.lolixco.com"]
 
 
@@ -81,3 +91,110 @@ def test_baseten_configuration_settings() -> None:
     assert custom_settings.BASETEN_MODEL == "meta-models/muse-spark-open-1026-custom"
     assert custom_settings.AI_REQUEST_TIMEOUT_SECONDS == 60
     assert custom_settings.AI_MAX_RETRIES == 1
+
+
+def test_database_provider_configuration_settings() -> None:
+    """Verify DATABASE_PROVIDER and SUPABASE_PUBLISHABLE_KEY configuration and validation."""
+    default_settings = Settings()
+    assert default_settings.DATABASE_PROVIDER == "memory"
+    assert default_settings.SUPABASE_PUBLISHABLE_KEY == ""
+
+    # Valid supabase config
+    supabase_settings = Settings(
+        DATABASE_PROVIDER="supabase",
+        SUPABASE_URL="https://myproj.supabase.co",
+        SUPABASE_PUBLISHABLE_KEY="sb_pub_key_123",
+    )
+    assert supabase_settings.DATABASE_PROVIDER == "supabase"
+    assert supabase_settings.SUPABASE_PUBLISHABLE_KEY == "sb_pub_key_123"
+
+    # Missing keys with supabase provider raises ValidationError
+    with pytest.raises(ValidationError):
+        Settings(DATABASE_PROVIDER="supabase", SUPABASE_URL="", SUPABASE_PUBLISHABLE_KEY="")
+
+    with pytest.raises(ValidationError):
+        Settings(
+            DATABASE_PROVIDER="supabase",
+            SUPABASE_URL="https://myproj.supabase.co",
+            SUPABASE_PUBLISHABLE_KEY="",
+        )
+
+    # Invalid database provider raises ValidationError
+    with pytest.raises(ValidationError):
+        Settings(DATABASE_PROVIDER="mysql")
+
+
+def test_repo_root_and_default_env_path_resolution() -> None:
+    """Verify REPO_ROOT and DEFAULT_ENV_FILE are absolute paths pointing to repo root .env."""
+    assert REPO_ROOT.is_absolute()
+    assert (REPO_ROOT / "backend" / "app" / "config.py").is_file()
+    assert DEFAULT_ENV_FILE == REPO_ROOT / ".env"
+    assert DEFAULT_ENV_FILE.is_absolute()
+
+
+def test_settings_load_consistently_regardless_of_working_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify settings load from the canonical repository-root .env regardless of process cwd."""
+    mock_root = tmp_path / "mock_repo"
+    mock_backend = mock_root / "backend"
+    mock_backend.mkdir(parents=True)
+
+    # Repository-root .env file
+    root_env = mock_root / ".env"
+    root_env.write_text("APP_ENV=root_loaded_env\n", encoding="utf-8")
+
+    # backend/.env that should NOT be loaded
+    backend_env = mock_backend / ".env"
+    backend_env.write_text("APP_ENV=backend_should_not_load\n", encoding="utf-8")
+
+    # Configure Settings to use the canonical root_env
+    monkeypatch.setitem(Settings.model_config, "env_file", root_env)
+
+    # 1. Starting from repository root
+    monkeypatch.chdir(mock_root)
+    settings_from_root = Settings()
+    assert settings_from_root.APP_ENV == "root_loaded_env"
+
+    # 2. Starting from backend/ directory
+    monkeypatch.chdir(mock_backend)
+    settings_from_backend = Settings()
+    assert settings_from_backend.APP_ENV == "root_loaded_env"
+
+
+def test_os_environment_variable_precedence_over_env_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify OS environment variables take precedence over .env file values."""
+    mock_env = tmp_path / ".env"
+    mock_env.write_text("APP_ENV=dotenv_value\nAI_PROVIDER=mock\n", encoding="utf-8")
+    monkeypatch.setitem(Settings.model_config, "env_file", mock_env)
+
+    monkeypatch.setenv("APP_ENV", "os_environ_override")
+    settings = Settings()
+    assert settings.APP_ENV == "os_environ_override"
+    assert settings.AI_PROVIDER == "mock"
+
+
+def test_default_env_file_loads_consistently_from_real_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify DEFAULT_ENV_FILE is preserved when working directory is repo root or backend/."""
+    # Restore actual default env_file for this test
+    monkeypatch.setitem(Settings.model_config, "env_file", DEFAULT_ENV_FILE)
+
+    # Test cwd = REPO_ROOT
+    monkeypatch.chdir(REPO_ROOT)
+    settings_root_cwd = Settings()
+
+    # Test cwd = REPO_ROOT / "backend"
+    monkeypatch.chdir(REPO_ROOT / "backend")
+    settings_backend_cwd = Settings()
+
+    # Both must produce identical configuration
+    assert settings_root_cwd.APP_ENV == settings_backend_cwd.APP_ENV
+    assert settings_root_cwd.AI_PROVIDER == settings_backend_cwd.AI_PROVIDER
+    assert settings_root_cwd.AWS_REGION == settings_backend_cwd.AWS_REGION
+    assert settings_root_cwd.ALLOWED_ORIGINS == settings_backend_cwd.ALLOWED_ORIGINS

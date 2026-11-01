@@ -39,6 +39,7 @@ class AuthenticatedUser:
     user_id: str
     is_anonymous: bool = True
     role: str = "authenticated"
+    access_token: str = ""
 
 
 def verify_supabase_jwt(
@@ -65,14 +66,23 @@ def verify_supabase_jwt(
 
     clean_token = token.strip()
 
-    # In test/dev environment ONLY, support raw non-JWT test identifiers (e.g. direct UUID)
-    # for fast offline unit tests that do not test token cryptography.
-    # Any token with JWT structure (header.payload.sig) MUST be verified.
-    if settings.APP_ENV in ("development", "test") and clean_token.count(".") != 2:
+    # Raw non-JWT test identifiers (e.g. direct UUID) are NEVER permitted in production.
+    # In development they are disabled by default, and only accepted if ALLOW_DEV_TEST_AUTH is True.
+    # They remain supported in the isolated "test" environment for unit tests.
+    # Any token with JWT structure (header.payload.sig) MUST be verified cryptographically.
+    allow_test_shortcut = settings.APP_ENV == "test" or (
+        settings.APP_ENV == "development" and getattr(settings, "ALLOW_DEV_TEST_AUTH", False)
+    )
+    if allow_test_shortcut and clean_token.count(".") != 2:
         candidate_uuid = clean_token.replace("test-user-", "").replace("anon-", "")
         try:
             val = str(uuid.UUID(candidate_uuid))
-            return AuthenticatedUser(user_id=val, is_anonymous=True, role="authenticated")
+            return AuthenticatedUser(
+                user_id=val,
+                is_anonymous=True,
+                role="authenticated",
+                access_token=clean_token,
+            )
         except ValueError:
             pass
 
@@ -244,6 +254,7 @@ def verify_supabase_jwt(
         user_id=user_uuid,
         is_anonymous=is_anonymous,
         role=role,
+        access_token=clean_token,
     )
 
 

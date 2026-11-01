@@ -130,6 +130,38 @@ Implements tables:
 
 All tables enforce Row Level Security (`auth.uid() = user_id`) so users (including anonymous visitors) cannot access each other's projects, media, or analyses.
 
+### 4.1 SupabaseRepository & PostgREST Persistence Architecture
+
+LolixCopilot implements a production-grade Supabase persistence layer for projects and media without adding bloated or opinionated client SDK dependencies:
+
+1. **Lightweight PostgREST Client:**
+   - Uses the installed `httpx.Client` to interact directly with Supabase's PostgREST REST endpoints (`/rest/v1/projects`, `/rest/v1/media`).
+   - Cleanly implements all methods from the abstract `BaseRepository`:
+     - **Projects:** `get_project`, `list_projects`, `create_project`, `get_or_create_default_project`, `update_project`.
+     - **Media:** `create_media`, `get_media`, `list_media`, `update_media_status`, `delete_media`.
+
+2. **Request-Scoped Isolation & Lifecycle:**
+   - Every database request is strictly bound to the authenticated request lifecycle.
+   - The repository is instantiated inside FastAPI's `get_repository` dependency with the caller's verified `AuthenticatedUser.access_token` and `SUPABASE_PUBLISHABLE_KEY`.
+   - Headers sent on every PostgREST query:
+     - `apikey: <SUPABASE_PUBLISHABLE_KEY>`
+     - `Authorization: Bearer <CURRENT_USER_ACCESS_TOKEN>`
+   - `get_repository` yields the repository and guarantees HTTP client closure via `finally: repo.close()`.
+   - Never shares client instances or cached authentication tokens across different requests or users.
+
+3. **Strict Row-Level Security & Ownership:**
+   - In accordance with PostgreSQL RLS policies, all queries filter explicitly on `auth.uid() = user_id` derived directly from the verified Supabase JWT (never trusted from request payloads).
+   - `Prefer: return=representation` header ensures atomicity and returns the mutated records immediately upon `POST`, `PATCH`, or `DELETE`.
+
+4. **Fail-Closed Guarantees:**
+   - Missing `SUPABASE_URL` or `SUPABASE_PUBLISHABLE_KEY` when `DATABASE_PROVIDER=supabase` raises a clear, immediate startup error (`RuntimeError`).
+   - Database network, permission, or constraint errors raise typed domain exceptions (`DatabaseError`, `DatabaseConnectionError`, `DatabasePermissionError`, `DatabaseRecordNotFoundError`) rather than masking failures.
+   - **Zero Silent Fallbacks:** The system never silently falls back to `InMemoryRepository` in production or live environments when Supabase is requested.
+   - Authentication tokens and database credentials are strictly sanitized and never emitted to application logs.
+
+5. **Orthogonal Storage & Database Configuration:**
+   - `DATABASE_PROVIDER` (`memory` vs `supabase`) and `USE_MOCK_STORAGE` (`true` vs `false`) are completely separate configurations. Developers can mix-and-match (e.g., Supabase DB + Mock Storage, or Supabase DB + Live S3).
+
 ## 5. API contract (Phase 1 Implemented)
 
 - `GET /api/health` — health check only; no secrets or diagnostics leaked.
@@ -210,43 +242,94 @@ LolixCopilot integrates Baseten as the primary planned provider for hackathon mo
   - Malformed JSON / schema mismatch maps to `AIValidationError` (502 Bad Gateway to client).
 - **User Authorization Safeguard:** Footage is never transmitted to Baseten without explicit user consent (`confirmed_baseten_consent: true`), verified at the API boundary (HTTP 400 if omitted).
 
-Do not blindly send every upload through every model. Route only to the service needed for the selected feature.
+### 7.2 Multimodal Audio & Vision Ingestion Architecture
 
-## 8. Credit and spend controls
+Following empirical research and official Baseten documentation:
 
-### Meta Model API
+1. **Video Ingestion & Frame Sampling:**
+   - Baseten's Muse Spark Open encoder retrieves video directly from private S3 via short-lived presigned HTTPS GET URLs.
+   - Baseten limits: Up to 2 videos per request, up to 300 seconds per video, max 200 MB per video, 896 MiB encoded-media budget.
+   - LolixCopilot enforces conservative MVP limits: max 60 seconds, max 100 MB.
+   - The encoder samples a maximum of **96 frames per video** (for a 60-second video, ~1.6 fps).
+   - **Crucial Multimodal Finding:** Muse Spark Open's video processing path **ignores the embedded audio track** entirely. Spoken words, dialogue, and sound design in the video are not processed unless audio is sent separately.
 
-- Keep a budget ledger per analysis, record API usage when supplied, and display only a user-friendly “analysis complete” status rather than invented dollar costs.
-- Limit initial videos to 60 seconds / 100 MB.
-- Limit a normal analysis to one main video-understanding call, plus an optional transcription call only if needed.
-- Moodboard generation is opt-in and rate limited.
-- Cache unchanged inputs.
-- Add a configurable daily analysis cap for the demo.
-- Before coding, review the current billing dashboard and verify which model mode the free credits use. The user's screenshot explicitly says content may be used for product improvement while free credits are in use; until terms are clear, use only authorized, non-sensitive test videos and display a concise notice before upload.
+2. **Reasoning Effort & Token Budgeting:**
+   - In accordance with empirical benchmark findings ([`MUSE_EXPERIMENTS_NOTES.md`](file:///home/vuld0/LolixCopilot/docs/research/MUSE_EXPERIMENTS_NOTES.md)):
+     - Muse Spark Open peaks at `reasoning_effort="low"` (88.5% pass@1).
+     - Muse rejects `reasoning_effort="none"`.
+     - High reasoning effort (`high`, `xhigh`, `max`) causes token exhaustion and truncation (19 of 400 answers truncated at `max` in benchmarks).
+   - LolixCopilot maintains `max_tokens=2500` and `temperature=0.2` to ensure intermediate chain-of-thought does not truncate the final `EditingBlueprint` JSON object.
 
-### Modal
+3. **Audio Processing & Multimodal Pipeline (Implemented):**
+   - **Extraction:** Bounded `LocalMediaProcessingService` (or Modal CPU worker) extracts the audio track (`16 kHz mono .wav`).
+   - **Storage:** Audio stored in private S3 bucket under scoped key `users/{user_id}/projects/{project_id}/media/{media_id}/audio.wav`.
+   - **Dual Ingestion:** In Baseten chat completion request, send both `video_url` and `audio_url` content parts in the same user message:
+     ```json
+     {
+       "role": "user",
+       "content": [
+         {"type": "text", "text": "Analyze footage, identify anime/film source, recognized characters, soundtrack, and generate editing blueprint..."},
+         {"type": "video_url", "video_url": {"url": "<presigned_video_url>"}},
+         {"type": "audio_url", "audio_url": {"url": "<presigned_audio_url>"}}
+       ]
+     }
+     ```
+   - **Alignment:** Fuse dialogue timing with visual cuts to prevent cutting off speakers mid-sentence.
 
-- Start with CPU-only Modal functions for FFmpeg/ffprobe and orchestration.
-- Do not deploy an always-on GPU or download giant model weights for this product's core path.
-- Set max runtime/concurrency, use ephemeral storage, clean up temporary files, and inspect Modal usage/logs after each deploy.
-- Install the official Modal agent skill with `modal skills install` and update it when current docs are needed. Modal's official skill is intended to help coding agents use current Modal patterns.
+## 8. Provider Adapters: Meta Model API & Baseten
 
-## 9. Production hardening after the hackathon
+LolixCopilot supports two distinct, decoupled inference providers behind a unified interface:
 
-- Move from hackathon retention to user-selectable policies and deletion verification.
-- Add plan/usage limits, abuse monitoring, job retry/queue policy, and audit logging.
-- Add integration tests against a separate development bucket/database.
-- Consider CDN playback only if product performance needs it; do not make private originals public to make the demo easier.
-- Add provider adapters, API versioning, observability dashboards, data export, and backups.
-- Integrate into the larger Lolixco application through a documented API or package; do not copy this repo into Lolixco.
+1. **Baseten (`BasetenProvider`):**
+   - **Model:** `meta-models/muse-spark-open` (configured default: `meta-models/muse-spark-open-1026`).
+   - **Protocol:** OpenAI-compatible `POST /v1/chat/completions`.
+   - **Capabilities:** Multimodal video, audio, and text input with serverless pay-per-token billing.
+   - **Media ingestion:** Direct short-lived presigned S3 URLs up to 200 MB; video encoder samples up to 96 frames per clip (~144 tok/s, capped at ~6.9K tokens).
+   - **Telemetry:** Real token usage (`prompt_tokens`, `completion_tokens`, `total_tokens`) and request latency recorded per inference.
 
-## 10. Primary references
+2. **Meta Model API (`MetaProvider`):**
+   - **Model:** `muse-spark-1.3`.
+   - **Protocol:** Official Meta Responses API `POST /v1/responses` with fallback to chat completions.
+   - **Capabilities:** Server-side multimodal video understanding with structured Pydantic schema validation.
+   - **Credentials:** Separate `MODEL_API_KEY` and `https://api.meta.ai/v1` base URL. If key is missing, system gracefully reports configuration required while allowing full operation with Baseten.
 
-- Meta Model API overview: https://dev.meta.ai/docs/overview
-- Meta API reference: https://dev.meta.ai/docs/api-reference
-- Meta video and audio understanding: https://dev.meta.ai/docs/video-understanding
-- Meta media segmentation: https://dev.meta.ai/docs/media-segmentation
-- Meta pricing/rate limits: https://dev.meta.ai/docs/pricing-rate-limits
-- Modal agent skills: https://modal.com/docs/cli/latest/skills
-- Modal ASGI app: https://modal.com/docs/sdk/py/latest/asgi_app
-- Modal volumes (do not use as the source of truth for user videos): https://modal.com/docs/sdk/py/latest/Volume
+3. **Music Fingerprint Interface (`BaseMusicFingerprintProvider`):**
+   - Decoupled interface for future specialized acoustic matching (e.g. ACRCloud) without blocking multimodal inference.
+
+## 9. Credit and spend controls
+
+### Meta Model API & Baseten
+- **Explicit Authorization:** Users must explicitly authorize model inference via an in-UI checkbox ("Authorize Meta AI / Baseten to analyze video via short-lived private S3 URL"). No silent background inferences occur on upload or page reload.
+- **Idempotency & Cost Protection:** Duplicate requests with identical media ID and brief parameters within TTL return cached analysis rather than re-billing paid tokens.
+- **Token Limits:** Configurable generation limits (`max_tokens=2500` to `3500`) prevent infinite chain-of-thought loops while safeguarding complete blueprint JSON structure.
+- **Rate & Upload Limits:** Enforces strict limits: max 60 seconds duration and 100 MB file size server-side.
+
+### Modal Infrastructure
+- **CPU-First Architecture:** FFmpeg probing, thumbnail extraction, and audio isolation execute on low-cost Debian CPU workers (< $0.09/hr per core), consuming < $2 across 1,000 clips.
+- **$100 Credit Pool Allocation:**
+  - Media workers: < $2.00 (2% of pool).
+  - Fine-Tuning: Axolotl QLoRA on a single Nvidia H100 (80GB) @ $3.95/hr consumes ~$7.90 for a complete 2-hour SFT run (< 8% of pool).
+  - Full-parameter FSDP2 on 8x H100 ($31.60/hr) is deferred as cost-prohibitive.
+
+## 10. Database Persistence & User Feedback Loop
+
+- **Database:** Supabase PostgreSQL with Row Level Security (RLS) and user-scoped policies.
+- **Forward-Only Migration:** `supabase/migrations/20261101180000_media_intelligence_and_analyses_persistence.sql` extends `analyses` table:
+  - `provider`: text (`baseten`, `meta`, `mock`).
+  - `model`: text (e.g., `meta-models/muse-spark-open-1026`, `muse-spark-1.3`).
+  - `source_identification`: JSONB (media classification, likely title, franchise, characters, confidence).
+  - `audio_intelligence`: JSONB (soundtrack title, artist, match status, genre, tempo, mood).
+  - `usage_metadata`: JSONB (tokens, latency, request IDs).
+  - `user_feedback`: JSONB (user confirmation or editor corrections for source and song).
+- **Feedback Loop:** AI Director interface lets editors validate identification accuracy or submit corrections, stored as structured feedback for future model adaptation.
+
+## 11. Primary References
+
+- Meta Model API Overview: https://dev.meta.ai/docs/overview
+- Meta Muse Spark Open Post-Training: https://dev.meta.ai/docs/muse-spark-open/post-training
+- Meta Muse Glimmer Post-Training: https://dev.meta.ai/docs/muse-glimmer/post-training
+- Baseten Documentation: https://docs.baseten.co/
+- Baseten Muse Spark Open Guide: https://github.com/meta-models/meta-oss-cookbook/blob/main/muse-spark/hosted/baseten.md
+- Modal Pricing: https://modal.com/pricing
+- Modal Training Infrastructure: https://modal.com/products/training
+- Modal Muse Spark Open Launch: https://modal.com/blog/meta-muse-spark-open-now-available-on-modal
