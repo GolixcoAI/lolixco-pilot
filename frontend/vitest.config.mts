@@ -5,6 +5,9 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    env: {
+      NEXT_PUBLIC_ALLOW_LOCAL_AUTH_FALLBACK: "true",
+    },
   },
   resolve: {
     alias: {

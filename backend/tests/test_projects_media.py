@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import Settings, get_settings
 from app.db.repository import InMemoryRepository, get_repository
 from app.main import app
 from app.services.s3 import MockStorageService, get_storage
@@ -29,6 +30,13 @@ def test_storage() -> MockStorageService:
 def client(
     test_repo: InMemoryRepository, test_storage: MockStorageService
 ) -> Generator[TestClient, None, None]:
+    test_settings = Settings(
+        APP_ENV="test",
+        ALLOW_DEV_TEST_AUTH=True,
+        DATABASE_PROVIDER="memory",
+        USE_MOCK_STORAGE=True,
+    )
+    app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_repository] = lambda: test_repo
     app.dependency_overrides[get_storage] = lambda: test_storage
     yield TestClient(app)
@@ -334,3 +342,133 @@ def test_media_delete_idempotent(
     # Second delete returns 404 because record is gone
     del_again = client.delete(f"/api/projects/{project_id}/media/{media_id}", headers=headers)
     assert del_again.status_code == 404
+
+
+def test_confirm_upload_idempotent_success(
+    client: TestClient,
+    test_storage: MockStorageService,
+) -> None:
+    headers = auth_header(USER_A_ID)
+    proj_res = client.post("/api/projects", headers=headers, json={"name": "Test Project"})
+    project_id = proj_res.json()["id"]
+
+    presign_res = client.post(
+        f"/api/projects/{project_id}/media/presign-upload",
+        headers=headers,
+        json={"filename": "repeat.mp4", "content_type": "video/mp4", "size_bytes": 5000},
+    )
+    media_id = presign_res.json()["media_id"]
+    s3_key = presign_res.json()["s3_key"]
+    test_storage.set_mock_object(s3_key, size_bytes=5000, exists=True)
+
+    # First confirmation
+    res1 = client.post(
+        f"/api/projects/{project_id}/media/{media_id}/confirm",
+        headers=headers,
+        json={"duration_seconds": 12.5},
+    )
+    assert res1.status_code == 200
+    assert res1.json()["status"] == "verified"
+    assert res1.json()["verified_size_bytes"] == 5000
+    assert res1.json()["duration_seconds"] == 12.5
+
+    # Second confirmation (idempotent call)
+    res2 = client.post(
+        f"/api/projects/{project_id}/media/{media_id}/confirm",
+        headers=headers,
+    )
+    assert res2.status_code == 200
+    assert res2.json()["status"] == "verified"
+    assert res2.json()["verified_size_bytes"] == 5000
+    assert res2.json()["duration_seconds"] == 12.5
+
+
+def test_confirm_upload_rejects_oversized_and_empty_objects(
+    client: TestClient,
+    test_storage: MockStorageService,
+) -> None:
+    headers = auth_header(USER_A_ID)
+    proj_res = client.post("/api/projects", headers=headers, json={"name": "Test Project"})
+    project_id = proj_res.json()["id"]
+
+    # 1. Empty object (0 bytes)
+    presign_empty = client.post(
+        f"/api/projects/{project_id}/media/presign-upload",
+        headers=headers,
+        json={"filename": "empty.mp4", "content_type": "video/mp4", "size_bytes": 100},
+    )
+    media_empty_id = presign_empty.json()["media_id"]
+    test_storage.set_mock_object(presign_empty.json()["s3_key"], size_bytes=0, exists=True)
+
+    res_empty = client.post(
+        f"/api/projects/{project_id}/media/{media_empty_id}/confirm",
+        headers=headers,
+    )
+    assert res_empty.status_code == 400
+    assert "empty" in res_empty.json()["detail"].lower()
+
+    # 2. Oversized object (> 100 MB)
+    presign_over = client.post(
+        f"/api/projects/{project_id}/media/presign-upload",
+        headers=headers,
+        json={"filename": "huge.mp4", "content_type": "video/mp4", "size_bytes": 1000},
+    )
+    media_over_id = presign_over.json()["media_id"]
+    test_storage.set_mock_object(
+        presign_over.json()["s3_key"],
+        size_bytes=105 * 1024 * 1024,  # 105 MB
+        exists=True,
+    )
+
+    res_over = client.post(
+        f"/api/projects/{project_id}/media/{media_over_id}/confirm",
+        headers=headers,
+    )
+    assert res_over.status_code == 413
+    assert "exceeds" in res_over.json()["detail"].lower()
+
+
+def test_confirm_upload_rejects_oversized_duration_and_invalid_mime(
+    client: TestClient,
+    test_storage: MockStorageService,
+) -> None:
+    headers = auth_header(USER_A_ID)
+    proj_res = client.post("/api/projects", headers=headers, json={"name": "Test Project"})
+    project_id = proj_res.json()["id"]
+
+    # 1. Oversized duration (> 60s)
+    presign_res = client.post(
+        f"/api/projects/{project_id}/media/presign-upload",
+        headers=headers,
+        json={"filename": "long.mp4", "content_type": "video/mp4", "size_bytes": 1000},
+    )
+    media_id = presign_res.json()["media_id"]
+    test_storage.set_mock_object(presign_res.json()["s3_key"], size_bytes=1000, exists=True)
+
+    res_dur = client.post(
+        f"/api/projects/{project_id}/media/{media_id}/confirm",
+        headers=headers,
+        json={"duration_seconds": 95.0},
+    )
+    assert res_dur.status_code == 400
+    assert "exceeds maximum allowed length" in res_dur.json()["detail"].lower()
+
+    # 2. Invalid MIME type in S3 metadata
+    presign_bad_mime = client.post(
+        f"/api/projects/{project_id}/media/presign-upload",
+        headers=headers,
+        json={"filename": "badmime.mp4", "content_type": "video/mp4", "size_bytes": 1000},
+    )
+    bad_id = presign_bad_mime.json()["media_id"]
+    test_storage.objects[presign_bad_mime.json()["s3_key"]] = {
+        "exists": True,
+        "size_bytes": 1000,
+        "content_type": "image/png",
+    }
+
+    res_mime = client.post(
+        f"/api/projects/{project_id}/media/{bad_id}/confirm",
+        headers=headers,
+    )
+    assert res_mime.status_code == 400
+    assert "invalid mime type" in res_mime.json()["detail"].lower()

@@ -27,6 +27,13 @@ function getDeterministicUuid(): string {
 }
 
 /**
+ * Reset cached Supabase client (used in tests).
+ */
+export function resetSupabaseClient(): void {
+  supabaseInstance = null;
+}
+
+/**
  * Return initialized Supabase client if public credentials are configured.
  */
 export function getSupabaseClient(): SupabaseClient | null {
@@ -58,14 +65,20 @@ export function getSupabaseClient(): SupabaseClient | null {
  * Automatically establish or restore an anonymous session.
  *
  * If Supabase credentials are configured, uses official signInAnonymously().
- * If not configured (local dev/offline testing), maintains a verified local anonymous session.
+ * If signInAnonymously() fails, returns a clear error and never falls back to local UUID.
+ * If credentials are not configured, local anonymous identity fallback is permitted
+ * ONLY when explicitly enabled via NEXT_PUBLIC_ALLOW_LOCAL_AUTH_FALLBACK in non-production.
  */
 export async function getAuthToken(): Promise<string> {
+  const { allowLocalAuthFallback } = getFrontendConfig();
   const client = getSupabaseClient();
 
   if (client) {
     try {
-      const { data: sessionData } = await client.auth.getSession();
+      const { data: sessionData, error: sessionError } = await client.auth.getSession();
+      if (sessionError) {
+        throw new Error(`Failed to retrieve Supabase session: ${sessionError.message}`);
+      }
       if (sessionData.session?.access_token) {
         return sessionData.session.access_token;
       }
@@ -73,30 +86,40 @@ export async function getAuthToken(): Promise<string> {
       // Establish new anonymous session
       const { data, error } = await client.auth.signInAnonymously();
       if (error) {
-        console.warn("Supabase anonymous sign-in error, using local identity:", error.message);
-      } else if (data.session?.access_token) {
+        throw new Error(`Supabase anonymous sign-in failed: ${error.message}`);
+      }
+      if (data.session?.access_token) {
         return data.session.access_token;
       }
+      throw new Error("Supabase anonymous sign-in succeeded but returned no access token.");
     } catch (err) {
-      console.warn("Error establishing Supabase session:", err);
+      // Fail closed when Supabase credentials are configured: NEVER silently create a local UUID!
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Authentication error: ${message}`);
     }
   }
 
-  // Local fallback anonymous identity
-  if (typeof window !== "undefined" && window.localStorage) {
-    let token = window.localStorage.getItem(LOCAL_STORAGE_ANON_TOKEN);
-    let userId = window.localStorage.getItem(LOCAL_STORAGE_ANON_ID);
+  // Supabase is NOT configured (offline / test mode)
+  // Insecure local identity fallback is permitted ONLY if explicitly enabled in non-production environments.
+  if (allowLocalAuthFallback) {
+    if (typeof window !== "undefined" && window.localStorage) {
+      let token = window.localStorage.getItem(LOCAL_STORAGE_ANON_TOKEN);
+      let userId = window.localStorage.getItem(LOCAL_STORAGE_ANON_ID);
 
-    if (!token || !userId) {
-      userId = getDeterministicUuid();
-      token = userId;
-      window.localStorage.setItem(LOCAL_STORAGE_ANON_ID, userId);
-      window.localStorage.setItem(LOCAL_STORAGE_ANON_TOKEN, token);
+      if (!token || !userId) {
+        userId = getDeterministicUuid();
+        token = userId;
+        window.localStorage.setItem(LOCAL_STORAGE_ANON_ID, userId);
+        window.localStorage.setItem(LOCAL_STORAGE_ANON_TOKEN, token);
+      }
+      return token;
     }
-    return token;
+    return "00000000-0000-0000-0000-000000000000";
   }
 
-  return "00000000-0000-0000-0000-000000000000";
+  throw new Error(
+    "Supabase credentials are not configured and local anonymous authentication fallback is disabled."
+  );
 }
 
 /**

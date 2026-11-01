@@ -1,0 +1,84 @@
+# LolixCopilot — Muse Glimmer 30B Multimodal QLoRA Training Configuration
+# Framework: Axolotl (0.19.0+) / TRL SFTTrainer
+# Reference Recipe: meta-models/meta-oss-cookbook + axolotl/examples/muse-glimmer/qlora-vision.yaml
+# Target Hardware: 1 x NVIDIA H100 (80GB SXM5) on Modal ($3.95/hr)
+
+base_model: meta-models/Muse-Glimmer-30B
+model_type: AutoModelForCausalLM
+tokenizer_type: AutoTokenizer
+image_processor_type: AutoProcessor
+
+# 4-bit Quantization (NormalFloat4 + Double Quantization for 1x H100 VRAM fit)
+load_in_4bit: true
+load_in_8bit: false
+bnb_4bit_quant_type: nf4
+bnb_4bit_use_double_quant: true
+bnb_4bit_compute_dtype: bfloat16
+
+# LoRA Configuration
+# Low-level ViT-G/14 vision tower is kept frozen. LoRA adapters target
+# attention projections, MLP SwiGLU layers, and multimodal projector.
+adapter: qlora
+freeze_vision_tower: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+  - multi_modal_projector
+
+# Dataset specification (OpenAI Messages format with typed {"type": "image"} content blocks)
+datasets:
+  - path: training/data/anime_event_dataset.jsonl
+    type: chat_template
+    chat_template: default
+
+val_set_size: 0.15
+output_dir: /checkpoints/muse_glimmer_qlora
+
+# Memory & Sequence Optimizations
+sequence_len: 4096
+sample_packing: false
+eval_sample_packing: false
+pad_to_sequence_len: false
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+flash_attention: true
+
+# Custom Kernel Optimizations (Official Meta/Axolotl Muse Glimmer recommendation)
+cut_cross_entropy: true
+liger_rms_norm: true
+liger_swiglu: true
+liger_rope: true
+
+# Optimizer & Batch Schedule for Single H100 (Effective Batch Size = 8)
+micro_batch_size: 1
+gradient_accumulation_steps: 8
+num_epochs: 3
+optimizer: paged_adamw_8bit
+learning_rate: 0.0002
+lr_scheduler: cosine
+warmup_steps: 20
+weight_decay: 0.01
+max_grad_norm: 1.0
+
+# Logging & Checkpoint Persistence to Modal Volume
+logging_steps: 5
+eval_steps: 25
+save_steps: 50
+save_total_limit: 3
+save_safetensors: true
+auto_resume_from_checkpoints: true
+
+# Precision & Telemetry
+bf16: true
+fp16: false
+tf32: true
+wandb_project: lolixcopilot-glimmer-30b

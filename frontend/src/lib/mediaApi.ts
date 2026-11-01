@@ -238,7 +238,7 @@ export async function deleteMedia(projectId: string, mediaId: string): Promise<v
 
 /**
  * Request AI video understanding analysis and generation of an Editing Blueprint.
- * Requires explicit user authorization for Baseten model inference.
+ * Supports configurable model provider (baseten, meta, or mock).
  */
 export async function analyzeMedia(
   projectId: string,
@@ -251,7 +251,8 @@ export async function analyzeMedia(
     aspectRatio: string;
     targetDuration: number;
   },
-  confirmedBasetenConsent: boolean,
+  confirmedConsent: boolean,
+  provider?: "baseten" | "meta" | "mock",
 ): Promise<import("@/types/workstation").AnalysisResponseData> {
   const { apiBaseUrl } = getFrontendConfig();
   const headers = await getAuthHeaders();
@@ -268,13 +269,74 @@ export async function analyzeMedia(
         aspect_ratio: brief.aspectRatio,
         target_duration: brief.targetDuration,
       },
-      confirmed_baseten_consent: confirmedBasetenConsent,
+      provider: provider || "baseten",
+      confirmed_consent: confirmedConsent,
+      confirmed_baseten_consent: confirmedConsent,
     }),
   });
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.detail || `Analysis request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Retrieve the latest persistent media intelligence and blueprint for an asset.
+ */
+export async function getLatestAnalysis(
+  projectId: string,
+  mediaId: string,
+): Promise<import("@/types/workstation").AnalysisResponseData | null> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(
+    `${apiBaseUrl}/api/projects/${projectId}/media/${mediaId}/analyze/latest`,
+    { headers },
+  );
+
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch latest analysis (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Submit user validation or corrections for source identification and soundtrack.
+ */
+export async function submitAnalysisFeedback(
+  projectId: string,
+  mediaId: string,
+  feedback: {
+    confirmed_by_user: boolean;
+    corrected_source_title?: string | null;
+    corrected_song_title?: string | null;
+    notes?: string | null;
+  },
+  analysisId?: string,
+): Promise<import("@/types/workstation").AnalysisResponseData> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const url = analysisId
+    ? `${apiBaseUrl}/api/projects/${projectId}/media/${mediaId}/analyze/feedback?analysis_id=${encodeURIComponent(analysisId)}`
+    : `${apiBaseUrl}/api/projects/${projectId}/media/${mediaId}/analyze/feedback`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(feedback),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to submit feedback (${res.status})`);
   }
   return res.json();
 }

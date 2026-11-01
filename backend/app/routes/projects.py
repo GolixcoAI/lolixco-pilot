@@ -80,21 +80,22 @@ async def update_project(
     repo: BaseRepository = Depends(get_repository),
 ) -> ProjectResponse:
     """Update project name or aspect ratio."""
-    project = repo.get_project(project_id, user.user_id)
-    if not project:
+    updated = repo.update_project(
+        project_id=project_id,
+        user_id=user.user_id,
+        name=payload.name,
+        aspect_ratio=payload.aspect_ratio,
+    )
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found or access denied",
         )
-    if payload.name is not None:
-        project.name = payload.name
-    if payload.aspect_ratio is not None:
-        project.aspect_ratio = payload.aspect_ratio
     return ProjectResponse(
-        id=project.id,
-        user_id=project.user_id,
-        name=project.name,
-        aspect_ratio=project.aspect_ratio,
-        created_at=project.created_at,
-        updated_at=project.updated_at,
+        id=updated.id,
+        user_id=updated.user_id,
+        name=updated.name,
+        aspect_ratio=updated.aspect_ratio,
+        created_at=updated.created_at,
+        updated_at=updated.updated_at,
     )

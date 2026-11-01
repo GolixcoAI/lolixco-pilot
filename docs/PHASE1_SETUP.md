@@ -52,7 +52,14 @@ SELECT * FROM projects; -- Returns only User B projects (User A records hidden)
 ### Step 1.5: Retrieve Supabase Keys & Configure Signing
 Go to **Project Settings** > **API**:
 - Copy **Project URL** -> `SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_URL`
-- Copy **anon public key** -> `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- Copy **anon public key / publishable key** -> `SUPABASE_PUBLISHABLE_KEY` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- **Database Provider Configuration:**
+  - `DATABASE_PROVIDER=supabase` enables live PostgREST persistence.
+  - `DATABASE_PROVIDER=memory` is available for offline testing and isolated unit tests (default in test environments).
+  - Note: `DATABASE_PROVIDER` is strictly independent from `USE_MOCK_STORAGE`.
+- **Fail-Closed Security Settings:**
+  - `ALLOW_DEV_TEST_AUTH=false`: Rejects raw UUID tokens by default. Only set to `true` in temporary local development when explicitly testing without a valid Supabase JWT. It is strictly blocked in production.
+  - `NEXT_PUBLIC_ALLOW_LOCAL_AUTH_FALLBACK=false`: If anonymous sign-in fails, the frontend fails closed with an informative error rather than silently forging an unauthenticated local UUID.
 - **Signing Configuration (Automatic Asymmetric JWKS or Symmetric HS256):**
   - **Modern Supabase (Recommended / Default):** Modern Supabase projects use asymmetric key pairs (RS256/ES256). The backend automatically fetches public keys from `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`. No secret needs to be stored on the server!
   - **Custom JWKS URL (Optional):** If using a custom gateway or self-hosted Supabase, configure `SUPABASE_JWKS_URL`.
@@ -146,22 +153,32 @@ For future production or worker roles, use [`scripts/aws/iam_policy.json`](file:
 
 ## 3. Local Environment Setup
 
-Create `.env` in the repository root (ignored by git):
+Create `.env` in the repository root (ignored by git, permissions `chmod 600`):
 
 ```bash
 # Frontend public config
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+NEXT_PUBLIC_ALLOW_LOCAL_AUTH_FALLBACK=false
 
-# Backend private secrets
+# Backend persistence & auth
+DATABASE_PROVIDER=supabase
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_JWT_SECRET=your-supabase-jwt-secret
+SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+SUPABASE_JWT_AUDIENCE=authenticated
+ALLOW_DEV_TEST_AUTH=false
+
+# Private AWS storage
+USE_MOCK_STORAGE=false
 AWS_REGION=ap-south-1
 AWS_S3_BUCKET=your-bucket-name
 AWS_ACCESS_KEY_ID=your-access-key-id
 AWS_SECRET_ACCESS_KEY=your-secret-access-key
 ALLOWED_ORIGINS=http://localhost:3000
+
+# AI Provider Configuration
+AI_PROVIDER=mock
 ```
 
 ---
@@ -208,41 +225,56 @@ npm run check:all
 
 LolixCopilot integrates Baseten ($100 promotional credits) as the primary provider for Meta's `meta-models/muse-spark-open-1026`.
 
-### Step 6.1: Server-Side Configuration
+### Step 6.1: Secure Server-Side Configuration (FastAPI)
 
-In your server `.env` (never commit secrets to Git or frontend bundles):
+In root `.env` (permissions `chmod 600`, strictly ignored by Git):
 ```bash
-# Enable Baseten inference
-AI_PROVIDER=baseten
-BASETEN_API_KEY=your_baseten_api_key_here
+# AI Provider Selection: "mock" (default for zero-credit safety) or "baseten"
+AI_PROVIDER=mock
+
+# Baseten Model API Configuration (Meta Global AI Developer Hackathon)
+BASETEN_API_KEY=
 BASETEN_BASE_URL=https://inference.baseten.co/v1
 BASETEN_MODEL=meta-models/muse-spark-open-1026
 AI_REQUEST_TIMEOUT_SECONDS=120
 AI_MAX_RETRIES=2
+
+# Meta Model API (Optional secondary provider)
+MODEL_API_KEY=
+META_BASE_URL=https://api.meta.ai/v1
+META_MODEL=muse-spark-1.3
 ```
 
 > [!IMPORTANT]
-> Keep `AI_PROVIDER=mock` during automated tests and initial development to avoid consuming credits. Only set `AI_PROVIDER=baseten` when explicitly conducting a live inference test.
+> **Entering your API Keys Safely:**
+> Open the root `.env` file in your terminal editor:
+> ```bash
+> nano .env
+> ```
+> Paste your Baseten API key directly after `BASETEN_API_KEY=` without spaces or quotes.
+> (Optionally, paste your Meta Model API key after `MODEL_API_KEY=`).
+> Save with `Ctrl+O`, and exit with `Ctrl+X`.
+> - Never paste your key into AI chat or commit it to Git.
+> - Never expose it in `frontend/.env.local` (frontend only receives browser-safe `NEXT_PUBLIC_` variables).
+> - Leave `AI_PROVIDER=mock` until you explicitly authorize the first live test.
 
-### Step 6.2: Controlled First Smoke Test Procedure
+### Step 6.2: Multimodal Ingestion Specifications & Constraints
+- **Video Input:** Model accepts video through HTTPS URLs. Baseten fetches media server-side directly from S3 using presigned URLs.
+- **Sampling Limit:** The encoder samples at most **96 frames per video** (regardless of frame rate or resolution).
+- **Audio Track Ignored:** Muse Spark Open's video processing path ignores embedded audio. Spoken words or dialogue are not heard by the model unless an audio track is sent separately via `audio_url`.
+- **Reasoning Effort:** Empirical research ([`MUSE_EXPERIMENTS_NOTES.md`](file:///home/vuld0/LolixCopilot/docs/research/MUSE_EXPERIMENTS_NOTES.md)) shows Muse Spark Open peaks at `reasoning_effort="low"`, rejects `"none"`, and suffers token truncation at `"high"` / `"max"`. `max_tokens` is set to 2,500 to protect structured JSON output from truncation.
 
-To verify live model inference without credit waste:
-1. **Prepare short, non-sensitive test media:**
-   Use a short 5-15 second video under 15 MB.
-2. **Start the backend server locally:**
-   ```bash
-   .venv/bin/uvicorn app.main:app --app-dir backend --port 8000
-   ```
-3. **Verify provider initialization via health/options check:**
-   Ensure no 500 startup errors are emitted.
-4. **Issue a single, controlled test request using the client or curl:**
-   - Verify the short-lived S3 URL resolves.
-   - Send `confirmed_baseten_consent: true`.
-   - Observe request latency, token consumption, and response structure.
-5. **Verify structured response validation:**
-   Confirm that Baseten returns a valid JSON string adhering to the `EditingBlueprint` schema.
-6. **Check Baseten Dashboard:**
-   Inspect credit usage and latency metrics in the Baseten console.
+### Step 6.3: Controlled Live Smoke Test Script
+
+We provide a dedicated, safeguard-protected CLI script:
+```bash
+python scripts/smoke_test_inference.py --provider baseten
+```
+Safeguards:
+1. Prompts for explicit typed confirmation (`RUN`) before dispatching any network request.
+2. Sends exactly 1 bounded inference request.
+3. Prints token usage, latency, source identification, audio intelligence, and blueprint moments.
+4. Never logs raw secrets or presigned tokens.
 
 ---
 
