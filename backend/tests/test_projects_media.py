@@ -448,7 +448,7 @@ def test_confirm_upload_rejects_oversized_duration_and_invalid_mime(
     res_dur = client.post(
         f"/api/projects/{project_id}/media/{media_id}/confirm",
         headers=headers,
-        json={"duration_seconds": 95.0},
+        json={"duration_seconds": 135.0},
     )
     assert res_dur.status_code == 400
     assert "exceeds maximum allowed length" in res_dur.json()["detail"].lower()

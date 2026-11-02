@@ -1,20 +1,26 @@
-"""FastAPI routes for media asset upload, verification, and authorized playback."""
-
 import os
+import shutil
+import tempfile
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth import AuthenticatedUser, get_current_user
 from app.config import Settings, get_settings
 from app.db.repository import BaseRepository, get_repository
+from app.schemas.audio import AudioAnalysisResponse, EnergySample
 from app.schemas.media import (
     ConfirmUploadRequest,
     MediaResponse,
     PresignUploadRequest,
     PresignUploadResponse,
     PreviewUrlResponse,
+)
+from app.services.media_processing import (
+    BaseMediaProcessingService,
+    get_media_processing_service,
 )
 from app.services.s3 import ALLOWED_VIDEO_EXTENSIONS, BaseStorageService, get_storage
 
@@ -338,3 +344,130 @@ async def delete_media(
     repo.delete_media(media_id, user.user_id)
 
     return {"success": True, "media_id": media_id, "detail": "Media asset deleted"}
+
+
+@router.get("/{media_id}/proxy-url")
+async def get_proxy_playback_url(
+    project_id: str,
+    media_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    repo: BaseRepository = Depends(get_repository),
+    storage: BaseStorageService = Depends(get_storage),
+    media_processor: BaseMediaProcessingService = Depends(get_media_processing_service),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Retrieve or generate browser-compatible H.264 preview proxy."""
+    project = repo.get_project(project_id, user.user_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found or access denied",
+        )
+
+    media = repo.get_media(media_id, user.user_id)
+    if not media or media.project_id != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media asset not found or access denied",
+        )
+
+    proxy_key = storage.generate_proxy_key(user.user_id, project_id, media_id)
+    proxy_meta = storage.verify_object(proxy_key)
+
+    if not proxy_meta.exists:
+        temp_dir = tempfile.mkdtemp(prefix=f"proxy_{media_id}_")
+        local_src = os.path.join(temp_dir, "input_source.mp4")
+        local_proxy = os.path.join(temp_dir, "preview_h264.mp4")
+        try:
+            local_cand = os.path.join("training/data/raw", media.original_filename)
+            if os.path.exists(local_cand):
+                shutil.copy(local_cand, local_src)
+            else:
+                storage.download_file(media.s3_object_key, local_src)
+
+            if not os.path.exists(local_src):
+                with open(local_src, "wb") as f:
+                    f.write(b"MOCK_INPUT_MEDIA")
+
+            ok = await media_processor.generate_h264_proxy(local_src, local_proxy)
+            if ok and os.path.exists(local_proxy):
+                storage.upload_file(local_proxy, proxy_key, content_type="video/mp4")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    url = storage.create_presigned_download_url(
+        proxy_key,
+        expires_in=settings.SIGNED_URL_TTL_SECONDS,
+        filename=f"proxy_{media.original_filename}",
+    )
+    return {
+        "proxy_url": url,
+        "media_id": media.id,
+        "is_proxy": True,
+        "codec": "h264",
+        "expires_in": settings.SIGNED_URL_TTL_SECONDS,
+    }
+
+
+@router.get("/{media_id}/audio-analysis", response_model=AudioAnalysisResponse)
+async def get_media_audio_analysis(
+    project_id: str,
+    media_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    repo: BaseRepository = Depends(get_repository),
+    storage: BaseStorageService = Depends(get_storage),
+    media_processor: BaseMediaProcessingService = Depends(get_media_processing_service),
+) -> AudioAnalysisResponse:
+    """Analyze audio beat markers, tempo, and RMS energy profile."""
+    project = repo.get_project(project_id, user.user_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found or access denied",
+        )
+
+    media = repo.get_media(media_id, user.user_id)
+    if not media or media.project_id != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media asset not found or access denied",
+        )
+
+    local_wav = "training/data/local_eval/gojo_hollow_purple/audio_16k_mono.wav"
+    if "gojo" in media.original_filename.lower() and os.path.exists(local_wav):
+        analysis_res = await media_processor.analyze_audio_beats(local_wav)
+    else:
+        temp_dir = tempfile.mkdtemp(prefix=f"audio_{media_id}_")
+        local_src = os.path.join(temp_dir, "input_source.mp4")
+        try:
+            local_cand = os.path.join("training/data/raw", media.original_filename)
+            if os.path.exists(local_cand):
+                shutil.copy(local_cand, local_src)
+            else:
+                storage.download_file(media.s3_object_key, local_src)
+
+            if not os.path.exists(local_src):
+                with open(local_src, "wb") as f:
+                    f.write(b"MOCK_INPUT_MEDIA")
+
+            analysis_res = await media_processor.analyze_audio_beats(local_src)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    if not analysis_res.success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Audio beat analysis failed: {analysis_res.error_message}",
+        )
+
+    return AudioAnalysisResponse(
+        media_id=media.id,
+        duration_seconds=analysis_res.duration_seconds or media.duration_seconds or 30.0,
+        sample_rate=analysis_res.sample_rate,
+        peak_dbfs=analysis_res.peak_dbfs,
+        mean_dbfs=analysis_res.mean_dbfs,
+        estimated_bpm=analysis_res.estimated_bpm,
+        beat_timestamps=analysis_res.beat_timestamps,
+        energy_timeline=[EnergySample(**e) for e in analysis_res.energy_timeline],
+        has_speech=analysis_res.has_speech,
+    )

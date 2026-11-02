@@ -341,3 +341,157 @@ export async function submitAnalysisFeedback(
   return res.json();
 }
 
+/**
+ * Fetch a temporary browser-compatible H.264 preview proxy playback URL.
+ */
+export async function getProxyPlaybackUrl(
+  projectId: string,
+  mediaId: string,
+): Promise<string> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(
+    `${apiBaseUrl}/api/projects/${projectId}/media/${mediaId}/proxy-url`,
+    { headers },
+  );
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch proxy URL (${res.status})`);
+  }
+  const data = await res.json();
+  return data.proxy_url;
+}
+
+export interface ChatDirectorEvidence {
+  timestamp_seconds: number;
+  timecode: string;
+  title: string;
+  description: string;
+  confidence: string;
+  phase: string;
+}
+
+export interface ChatDirectorMessage {
+  id: string;
+  role: "assistant" | "user";
+  content: string;
+  timestamp: string;
+  timecode_jump?: number | null;
+  suggested_action?: string | null;
+  evidence_cards?: ChatDirectorEvidence[];
+}
+
+export interface ChatDirectorResponse {
+  message: ChatDirectorMessage;
+  updated_blueprint?: Record<string, unknown>;
+}
+
+/**
+ * Send natural creator query to the AI Director assistant.
+ */
+export async function sendChatMessage(
+  projectId: string,
+  message: string,
+  mediaId?: string,
+): Promise<ChatDirectorResponse> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${apiBaseUrl}/api/projects/${projectId}/chat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      message,
+      media_id: mediaId || null,
+    }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Chat query failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Analyze audio track beats, energy curve, and musical downbeats.
+ */
+export async function getAudioAnalysis(
+  projectId: string,
+  mediaId: string,
+): Promise<{
+  media_id: string;
+  duration_seconds: number;
+  sample_rate: number;
+  peak_dbfs: number;
+  mean_dbfs: number;
+  estimated_bpm: number;
+  beat_timestamps: number[];
+  energy_timeline: Array<{ timestamp: number; normalized_energy: number }>;
+  has_speech: boolean;
+}> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(
+    `${apiBaseUrl}/api/projects/${projectId}/media/${mediaId}/audio-analysis`,
+    { headers },
+  );
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Audio beat analysis failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export interface ExportSegmentRequest {
+  start_seconds: number;
+  end_seconds: number;
+  title?: string;
+  speed_multiplier?: number;
+}
+
+export interface ExportCutResponse {
+  job_id: string;
+  media_id: string;
+  export_object_key: string;
+  download_url: string;
+  duration_seconds: number;
+  file_size_bytes: number;
+  segment_count: number;
+  resolution: string;
+  status: "completed" | "failed";
+  rendered_at: string;
+  expires_in_seconds: number;
+}
+
+/**
+ * Render approved editing blueprint into trimmed, concatenated H.264 MP4 export.
+ */
+export async function renderExportCut(
+  projectId: string,
+  request: {
+    media_id: string;
+    segments: ExportSegmentRequest[];
+    resolution?: "1080p" | "720p" | "source";
+    include_audio?: boolean;
+  },
+): Promise<ExportCutResponse> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${apiBaseUrl}/api/projects/${projectId}/export`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Export cut render failed (${res.status})`);
+  }
+  return res.json();
+}

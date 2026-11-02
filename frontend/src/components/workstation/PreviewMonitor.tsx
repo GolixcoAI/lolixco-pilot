@@ -14,6 +14,8 @@ interface PreviewMonitorProps {
   onTogglePlay: () => void;
   onSkipBack?: () => void;
   onSkipForward?: () => void;
+  onSwitchToProxy?: () => void;
+  isProxyActive?: boolean;
 }
 
 export function PreviewMonitor({
@@ -26,6 +28,8 @@ export function PreviewMonitor({
   onTogglePlay,
   onSkipBack,
   onSkipForward,
+  onSwitchToProxy,
+  isProxyActive,
 }: PreviewMonitorProps) {
   const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
@@ -94,6 +98,24 @@ export function PreviewMonitor({
         <span className="rounded bg-[#0a0d14]/80 px-2 py-0.5 text-[10px] font-mono font-semibold text-[#9ca3af] backdrop-blur-md border border-[#1f2433]">
           HDR
         </span>
+        {onSwitchToProxy && (
+          <button
+            type="button"
+            onClick={onSwitchToProxy}
+            title={
+              isProxyActive
+                ? "Currently using H.264 proxy. Click to toggle source."
+                : "Switch to compatible H.264 preview proxy"
+            }
+            className={`rounded px-2 py-0.5 text-[10px] font-mono font-bold backdrop-blur-md transition-colors border ${
+              isProxyActive
+                ? "bg-[#ffe600]/20 text-[#ffe600] border-[#ffe600]/50 shadow-[0_0_8px_rgba(255,230,0,0.3)]"
+                : "bg-[#0a0d14]/80 text-[#9ca3af] border-[#1f2433] hover:text-[#ffffff]"
+            }`}
+          >
+            {isProxyActive ? "H.264 PROXY" : "SOURCE (AV1)"}
+          </button>
+        )}
       </div>
 
       {/* Main Preview Canvas Area */}
@@ -115,6 +137,12 @@ export function PreviewMonitor({
               onTimeUpdate={() => {
                 if (videoRef.current) {
                   onSeek(videoRef.current.currentTime);
+                }
+              }}
+              onError={() => {
+                if (!isProxyActive && onSwitchToProxy) {
+                  console.warn("Video playback error; auto-switching to H.264 proxy");
+                  onSwitchToProxy();
                 }
               }}
             />

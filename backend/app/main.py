@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .routes.analysis import router as analysis_router
+from .routes.chat import router as chat_router
+from .routes.export import router as export_router
 from .routes.health import router as health_router
 from .routes.media import router as media_router
 from .routes.projects import router as projects_router
@@ -50,3 +52,5 @@ app.include_router(health_router, prefix="")
 app.include_router(projects_router)
 app.include_router(media_router)
 app.include_router(analysis_router)
+app.include_router(export_router)
+app.include_router(chat_router)

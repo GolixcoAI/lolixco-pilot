@@ -25,12 +25,15 @@ import {
   UsageMetadataData,
   UserFeedbackData,
 } from "@/types/workstation";
+import { ExportModal } from "@/components/workstation/ExportModal";
 import {
   analyzeMedia,
   confirmUpload,
   deleteMedia,
+  getAudioAnalysis,
   getLatestAnalysis,
   getOrCreateProject,
+  getProxyPlaybackUrl,
   listProjectMedia,
   requestPresignedUpload,
   submitAnalysisFeedback,
@@ -73,6 +76,12 @@ export default function WorkstationPage() {
 
   // Modal dialog state
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+
+  // Audio beat markers and proxy playback states
+  const [beatTimestamps, setBeatTimestamps] = useState<number[]>([12.8, 19.6, 28.0, 35.0, 48.0]);
+  const [isProxyActive, setIsProxyActive] = useState(false);
+  const originalSrcRef = useRef<{ [key: string]: string }>({});
 
   // Find currently active clip
   const activeClip = clips.find((c) => c.id === activeClipId) || clips[0] || null;
@@ -474,6 +483,112 @@ export default function WorkstationPage() {
     };
   }, [activeClipId, activeClip?.isRealUpload, projectId]);
 
+  // Fetch audio beat timestamps when active clip changes
+  useEffect(() => {
+    let active = true;
+    if (activeClip?.isRealUpload && projectId && activeClipId && !activeClipId.startsWith("upload-")) {
+      getAudioAnalysis(projectId, activeClipId)
+        .then((analysis) => {
+          if (!active) return;
+          if (analysis?.beat_timestamps && analysis.beat_timestamps.length > 0) {
+            setBeatTimestamps(analysis.beat_timestamps);
+          }
+        })
+        .catch(() => {
+          // Graceful fallback to default beat points
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [activeClipId, activeClip?.isRealUpload, projectId]);
+
+  // Toggle browser-compatible H.264 preview proxy vs original source
+  const handleSwitchToProxy = async () => {
+    if (!activeClip || !projectId || !activeClipId || activeClipId.startsWith("upload-")) return;
+
+    if (isProxyActive) {
+      const originalSrc = originalSrcRef.current[activeClipId];
+      if (originalSrc) {
+        setClips((prev) =>
+          prev.map((c) => (c.id === activeClipId ? { ...c, src: originalSrc } : c)),
+        );
+      }
+      setIsProxyActive(false);
+      return;
+    }
+
+    try {
+      if (activeClip.src && !originalSrcRef.current[activeClipId]) {
+        originalSrcRef.current[activeClipId] = activeClip.src;
+      }
+      const proxyUrl = await getProxyPlaybackUrl(projectId, activeClipId);
+      setClips((prev) =>
+        prev.map((c) => (c.id === activeClipId ? { ...c, src: proxyUrl } : c)),
+      );
+      setIsProxyActive(true);
+    } catch (err) {
+      console.warn("Could not load H.264 proxy, keeping source:", err);
+    }
+  };
+
+  // Load rendered FFmpeg export cut into preview monitor
+  const handleLoadRenderedCut = (cutUrl: string, duration: number) => {
+    const exportClipId = `export-${Date.now()}`;
+    const exportClip: MediaClip = {
+      id: exportClipId,
+      title: `${projectName} - Exported Cut (${duration.toFixed(1)}s)`,
+      type: "video",
+      duration,
+      size: "22.4 MB",
+      resolution: "1080p",
+      src: cutUrl,
+      isRealUpload: false,
+      status: "verified",
+    };
+    setClips((prev) => [exportClip, ...prev]);
+    setActiveClipId(exportClipId);
+    setCurrentTime(0);
+    setIsPlaying(true);
+    setIsExportModalOpen(false);
+  };
+
+  // Apply AI Director generated blueprint scenes directly to timeline
+  const handleApplyBlueprint = (blueprint: Record<string, unknown>) => {
+    const rawScenes = blueprint?.scenes;
+    if (Array.isArray(rawScenes)) {
+      const mappedMoments: KeyMoment[] = rawScenes.map((rawScene: unknown, idx: number) => {
+        const scene = rawScene as {
+          id?: string;
+          start_seconds?: number;
+          end_seconds?: number;
+          moment?: string;
+          why_it_works?: string;
+          editing_direction?: string;
+        };
+        const startSec = typeof scene.start_seconds === "number" ? scene.start_seconds : 0;
+        const tag: MomentTag =
+          idx === 0 ? "HOOK" : idx === 1 ? "BUILD" : idx === 2 ? "CLIMAX" : "RESOLVE";
+        return {
+          id: scene.id || `scene-${idx + 1}`,
+          index: idx + 1,
+          timecode: formatTimecode(startSec),
+          seconds: startSec,
+          endSeconds: scene.end_seconds,
+          tag,
+          title: scene.moment || `Scene ${idx + 1}`,
+          description: scene.why_it_works || "",
+          action: scene.editing_direction || "",
+        };
+      });
+      setMoments(mappedMoments);
+      if (mappedMoments.length > 0) {
+        setActiveMomentId(mappedMoments[0].id);
+        setCurrentTime(mappedMoments[0].seconds);
+      }
+    }
+  };
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#050505] text-[#ffffff] font-sans">
       {/* Top Command Bar */}
@@ -483,6 +598,7 @@ export default function WorkstationPage() {
         aspectRatio={aspectRatio}
         setAspectRatio={setAspectRatio}
         onOpenPrivacyNotice={() => setIsPrivacyModalOpen(true)}
+        onOpenExport={() => setIsExportModalOpen(true)}
       />
 
       {/* Center Workstation: Left Rail + Media Bin + Preview Monitor + AI Director */}
@@ -521,6 +637,8 @@ export default function WorkstationPage() {
           onTogglePlay={() => setIsPlaying((p) => !p)}
           onSkipBack={() => setCurrentTime(0)}
           onSkipForward={() => setCurrentTime(clipDuration)}
+          onSwitchToProxy={handleSwitchToProxy}
+          isProxyActive={isProxyActive}
         />
 
         {/* Right AI Director Panel */}
@@ -544,6 +662,10 @@ export default function WorkstationPage() {
           userFeedback={userFeedback}
           onFeedbackSubmit={handleFeedbackSubmit}
           hasUploadedVideo={Boolean(activeClip?.isRealUpload)}
+          projectId={projectId}
+          activeClipId={activeClipId}
+          activeClipTitle={activeClip?.title}
+          onApplyBlueprint={handleApplyBlueprint}
         />
       </div>
 
@@ -554,12 +676,35 @@ export default function WorkstationPage() {
         moments={moments}
         activeClip={activeClip}
         onSeek={(sec) => setCurrentTime(sec)}
+        beatTimestamps={beatTimestamps}
       />
 
       {/* Privacy and Policy Modal */}
       <PrivacyModal
         isOpen={isPrivacyModalOpen}
         onClose={() => setIsPrivacyModalOpen(false)}
+      />
+
+      {/* Real FFmpeg S3 Video Export Modal */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        projectId={projectId}
+        mediaId={activeClipId}
+        projectName={projectName}
+        defaultSegments={
+          moments.length > 0
+            ? moments.map((m) => ({
+                start_seconds: m.seconds,
+                end_seconds:
+                  m.endSeconds !== undefined
+                    ? m.endSeconds
+                    : Math.min(clipDuration, m.seconds + 5.0),
+                title: m.title,
+              }))
+            : undefined
+        }
+        onLoadRenderedCut={handleLoadRenderedCut}
       />
     </div>
   );

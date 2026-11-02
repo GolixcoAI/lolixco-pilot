@@ -9,6 +9,7 @@ interface TimelineProps {
   moments: KeyMoment[];
   activeClip: MediaClip | null;
   onSeek: (seconds: number) => void;
+  beatTimestamps?: number[];
 }
 
 export function Timeline({
@@ -17,6 +18,7 @@ export function Timeline({
   moments,
   activeClip,
   onSeek,
+  beatTimestamps,
 }: TimelineProps) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [snapping, setSnapping] = useState(true);
@@ -249,7 +251,12 @@ export function Timeline({
               return (
                 <div
                   key={moment.id}
-                  className="group absolute top-1 bottom-1 flex flex-col justify-between overflow-hidden rounded border border-[#333d52] bg-[#161b29] p-1.5 shadow-sm transition-colors hover:border-[#ffe600]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSeek(moment.seconds);
+                  }}
+                  title={`Click to seek playhead to ${moment.timecode}`}
+                  className="group absolute top-1 bottom-1 flex flex-col justify-between overflow-hidden rounded border border-[#333d52] bg-[#161b29] p-1.5 shadow-sm transition-colors hover:border-[#ffe600] cursor-pointer"
                   style={{
                     left: `${startRatio * 100}%`,
                     width: `${widthRatio * 100}%`,
@@ -273,8 +280,30 @@ export function Timeline({
             })}
           </div>
 
-          {/* Track A1 Audio Waveform Container (Bright Neon Yellow Waveform) */}
+          {/* Track A1 Audio Waveform Container (Bright Neon Yellow Waveform & Beat Markers) */}
           <div className="relative h-11 w-full border-b border-[#1f2433]/60 bg-[#0a0d14]">
+            {/* Dynamic beat markers on musical onsets */}
+            {beatTimestamps &&
+              beatTimestamps.map((beat, i) => {
+                const leftPercent = (beat / totalSeconds) * 100;
+                if (leftPercent > 100) return null;
+                return (
+                  <div
+                    key={i}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSeek(beat);
+                    }}
+                    title={`Beat sync marker at ${beat.toFixed(1)}s (Click to seek)`}
+                    className="absolute top-0 bottom-0 z-20 flex flex-col items-center cursor-pointer group"
+                    style={{ left: `${leftPercent}%` }}
+                  >
+                    <div className="h-2 w-2 rounded-full bg-[#ffe600] shadow-[0_0_8px_rgba(255,230,0,0.9)] -translate-y-0.5" />
+                    <div className="h-full w-px bg-[#ffe600]/40 group-hover:bg-[#ffe600] group-hover:w-[2px] transition-all" />
+                  </div>
+                );
+              })}
+
             <svg
               className="h-full w-full"
               preserveAspectRatio="none"

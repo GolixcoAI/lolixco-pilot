@@ -17,7 +17,7 @@ def test_default_settings() -> None:
     settings = Settings()
     assert settings.APP_ENV in ("development", "test", "production")
     assert settings.MAX_UPLOAD_BYTES == 104857600
-    assert settings.MAX_VIDEO_SECONDS == 60
+    assert settings.MAX_VIDEO_SECONDS == 120
     assert settings.SIGNED_URL_TTL_SECONDS == 900
     assert settings.VIDEO_RETENTION_DAYS == 7
     assert settings.DAILY_ANALYSIS_LIMIT == 5

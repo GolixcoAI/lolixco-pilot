@@ -38,10 +38,10 @@ class Settings(BaseSettings):
         description="Max video upload size in bytes (default 100 MB, limit 500 MB)",
     )
     MAX_VIDEO_SECONDS: int = Field(
-        default=60,
+        default=120,
         gt=0,
         le=300,
-        description="Max allowed video length in seconds (default 60)",
+        description="Max allowed video length in seconds (default 120 for hackathon demo)",
     )
     SIGNED_URL_TTL_SECONDS: int = Field(
         default=900,

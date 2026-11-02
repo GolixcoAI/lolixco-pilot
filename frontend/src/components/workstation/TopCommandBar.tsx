@@ -10,6 +10,8 @@ interface TopCommandBarProps {
   aspectRatio: "9:16" | "16:9" | "1:1";
   setAspectRatio: (ratio: "9:16" | "16:9" | "1:1") => void;
   onOpenPrivacyNotice: () => void;
+  onOpenExport?: () => void;
+  isExporting?: boolean;
 }
 
 export function TopCommandBar({
@@ -18,6 +20,8 @@ export function TopCommandBar({
   aspectRatio,
   setAspectRatio,
   onOpenPrivacyNotice,
+  onOpenExport,
+  isExporting,
 }: TopCommandBarProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [healthStatus, setHealthStatus] = useState<"healthy" | "connecting" | "offline">("connecting");
@@ -46,6 +50,10 @@ export function TopCommandBar({
   }, [config.apiBaseUrl]);
 
   const handleExportClick = () => {
+    if (onOpenExport) {
+      onOpenExport();
+      return;
+    }
     setExportNotice("Exporting blueprints will be enabled in Phase 3. Workstation is currently in preview mode.");
     setTimeout(() => setExportNotice(null), 3500);
   };
@@ -181,12 +189,20 @@ export function TopCommandBar({
         <button
           type="button"
           onClick={handleExportClick}
-          className="flex h-8 items-center gap-1.5 rounded-md bg-[#ffe600] px-3.5 text-xs font-bold text-[#000000] shadow-[0_0_12px_rgba(255,230,0,0.25)] transition-all hover:bg-[#fff04d] active:scale-98"
+          disabled={isExporting}
+          className="flex h-8 items-center gap-1.5 rounded-md bg-[#ffe600] px-3.5 text-xs font-bold text-[#000000] shadow-[0_0_12px_rgba(255,230,0,0.25)] transition-all hover:bg-[#fff04d] active:scale-98 disabled:opacity-50"
         >
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-          </svg>
-          <span>Export</span>
+          {isExporting ? (
+            <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+            </svg>
+          ) : (
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+          )}
+          <span>{isExporting ? "Rendering..." : "Export Cut"}</span>
         </button>
       </div>
     </header>
