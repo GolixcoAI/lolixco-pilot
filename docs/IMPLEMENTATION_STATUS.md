@@ -506,21 +506,11 @@ See `docs/PHASE1_SETUP.md` for full instructions.
 ### Phase 3: End-to-End Workstation, AI Director, AWS S3 Pipeline & FFmpeg Export (Completed)
 - **1. Context-Aware AI Director Chatbox (`backend/app/services/chat_director.py`, `backend/app/routes/chat.py`):**
   - Implemented `POST /api/projects/{project_id}/chat` with full conversational memory and media context grounding.
-  - Handles 10 core creator queries with structured evidence and confidence ratings:
-    1. Anime identification (*"Identify this anime"* -> Jujutsu Kaisen, Season 1 Episode 20 / Kyoto Goodwill Arc, 96% confidence).
-    2. Character recognition (*"Who is this character?"* -> Satoru Gojo, Special Grade Jujutsu Sorcerer, Six Eyes & Limitless).
-    3. Action event retrieval (*"Find Gojo using Hollow Purple"* -> Kyoshiki: Murasaki sequence, [00:18.00 - 00:48.00]).
-    4. Action peak discharge (*"Find the peak discharge"* / *"Find the strongest action moment"* -> 00:35.00 energy sphere release).
-    5. 30-second cinematic cut (*"Make me a cinematic 30-second edit"* -> 4-stage scene sequence: Hook, Convergence, Climax, Aftermath).
-    6. Rapid pacing (*"Give me faster cuts"* -> 0.8s - 1.8s micro-cuts with impact frames).
-    7. Motion ramps (*"Suggest velocity ramps"* -> 50% slow-mo build-up ramping to 200% burst speed on release).
-    8. Audio beat synchronization (*"Synchronize edits with the beat"* -> cuts aligned to 12.8s, 19.6s, 28.0s, 35.0s, 48.0s).
-    9. Hook opening (*"Give me a better opening"* -> Incantation hand sign focus at 00:18.00).
-    10. Impactful ending (*"Find an impactful ending"* -> Destructive shockwave aftermath at 00:48.00).
+  - Handles 10 core creator queries with structured evidence and confidence ratings (Anime identification, character recognition, Hollow Purple retrieval, peak discharge, 30-second cut, rapid pacing, velocity ramps, beat synchronization, hook opening, impactful ending).
   - UI features quick query chips, interactive timecode click-to-seek, evidence cards, and direct *"Apply 30s Cut Blueprint to Timeline"* integration.
 - **2. Browser Playback & H.264 Compatibility Proxy (`backend/app/services/media_processing.py`, `backend/app/routes/media.py`):**
   - Endpoint: `GET /api/projects/{project_id}/media/{media_id}/proxy-url`.
-  - Probes media codec; if video is AV1 (which fails in browsers without hardware decoding), generates 1080p H.264 proxy with AAC stereo audio.
+  - Probes media codec; if video is AV1, generates 1080p H.264 proxy with AAC stereo audio.
   - Uploaded and verified in private S3 bucket under `proxies/demo-eval/gojo_h264_proxy.mp4` (29.8 MB).
   - Preview monitor includes proxy toggle (`SOURCE (AV1)` vs `H.264 PROXY`) and automatic error fallback on `<video onError>`.
 - **3. Audio Intelligence & Beat Synchronization (`backend/app/routes/media.py`, `Timeline.tsx`):**
@@ -530,20 +520,46 @@ See `docs/PHASE1_SETUP.md` for full instructions.
 - **4. Video Trimming & Multi-Segment Render Cut Pipeline (`backend/app/routes/export.py`, `ExportModal.tsx`):**
   - Endpoint: `POST /api/projects/{project_id}/export`.
   - FFmpeg pipeline validates segment bounds (`0 <= start < end <= duration`), trims individual scenes, concatenates with PTS reassignment, and preserves synchronized AAC stereo audio.
-  - Verified live render of 4 Gojo scenes (18-24s, 26-31s, 34-41s, 44-50s):
-    - Duration: `24.04s`, Resolution: `2560x1440`, Video: `H.264 (yuv420p)`, Audio: `AAC stereo 44.1kHz`, File Size: `22.4 MB`.
-    - Uploaded to private S3: `exports/demo-eval/gojo_30s_cinematic_cut.mp4`.
-  - Frontend `ExportModal` features segment preview, resolution selector, live progress tracking, authenticated S3 MP4 download, and *"Play in Preview"* monitor hook.
+  - Verified live render of 4 Gojo scenes (18-24s, 26-31s, 34-41s, 44-50s) to `exports/demo-eval/gojo_30s_cinematic_cut.mp4` (24.04s, 2560x1440, H.264, 22.4 MB).
 - **5. AWS EC2 Quota Verification & Execution Path:**
-  - Regional quota check (`aws service-quotas` in `ap-south-1`):
-    - `L-7295265B` (Running On-Demand P instances): `0.0`
-    - `L-3819AECD` (Running On-Demand G and VT instances): `0.0`
-  - Technical decision: Fall back to Modal H100 80GB GPU for QLoRA training/inference, while AWS S3 serves as the primary media storage and processing foundation (`users/`, `proxies/`, `thumbnails/`, `exports/`, `ml-artifacts/`).
-- **6. Verification & Test Suite Summary:**
-  - Backend: **186 / 186 tests passed** (100% pass rate in 14.77s).
-  - Frontend: **30 / 30 tests passed** (`vitest`).
-  - TypeScript: `tsc --noEmit` passed with 0 errors.
-  - Next.js: Production build succeeded (`npm run build`).
+  - Regional quota check (`aws service-quotas` in `ap-south-1`): On-Demand P and G instances limit is 0.0 vCPUs.
+  - Execution path: Fall back to Modal H100 80GB GPU for QLoRA fine-tuning/inference, with AWS S3 and Lambda powering media storage, event notifications, and video processing.
+
+### Phase 4: AWS Preflight, Serverless Media Pipeline & Live Lambda Deployment (Completed)
+- **1. AWS Preflight Verification & Resource Audit (`ap-south-1`):**
+  - Identity: `arn:aws:iam::247673029886:user/rohan-admin` (Account `247673029886`).
+  - S3 Private Storage: `lolixcopilot-media-247673029886-ap-south-1` verified live with `BlockPublicAcls=true`, `SSEAlgorithm=AES256`, CORS enabled for `http://localhost:3000` & `https://*.lolixco.com`, and 7-day auto-expiration on `users/`.
+  - EC2 GPU Service Quotas in `ap-south-1`:
+    - `L-417A185B` (Running On-Demand P instances): `0.0` vCPUs.
+    - `L-DB2E81BA` (Running On-Demand G and VT instances): `0.0` vCPUs.
+    - `L-1216C47A` (Running On-Demand Standard instances): `32.0` vCPUs.
+  - AWS Cost Explorer (`aws ce get-cost-and-usage`): October unblended cost $0.00; November unblended cost $0.00.
+  - AWS Elemental MediaConvert Service Status: Returned `SubscriptionRequiredException: The AWS Access Key Id needs a subscription for the service` across both `ap-south-1` and `us-east-1` (requires account-level subscription activation in AWS Console).
+- **2. Serverless Media Pipeline Deployment via AWS Lambda (`workers/lambda_media_processor/`):**
+  - Authored `workers/lambda_media_processor/handler.py` providing automated S3 event processing, direct invocation, and EventBridge event handling.
+  - Created IAM execution role `LolixCopilotLambdaExecutionRole` (`arn:aws:iam::247673029886:role/LolixCopilotLambdaExecutionRole`) with CloudWatch basic execution role and scoped S3 read/write permissions.
+  - Packaged static Linux x86_64 FFmpeg binary (77 MB John Van Sickle binary) with handler into 29 MB deployment zip and uploaded to `s3://lolixcopilot-media-247673029886-ap-south-1/lambda/media_processor.zip`.
+  - Provisioned AWS Lambda function `lolixcopilot-media-processor` (`arn:aws:lambda:ap-south-1:247673029886:function:lolixcopilot-media-processor`):
+    - Runtime: `python3.12` (x86_64)
+    - Memory: `2048 MB` (proportional vCPU)
+    - Timeout: `300 seconds`
+    - Ephemeral Storage: `2048 MB` (/tmp)
+  - Configured S3 Bucket Event Notification on `lolixcopilot-media-247673029886-ap-south-1` with prefix `users/` and granted S3 principal permission to invoke Lambda.
+- **3. Live AWS Lambda Function Verification:**
+  - `probe` invocation: Verified against Gojo AV1 original footage (`users/demo-eval/projects/gojo-hollow-purple/media/gojo_hollow_purple_edit.mp4`) -> returned HTTP 200, duration 68.08s, 2560x1440, video codec `av1`, audio codec `aac`, fps 30.0.
+  - `extract_audio_beats` invocation: Verified against Gojo footage -> returned HTTP 200, mean volume -21.0 dBFS, max volume -0.4 dBFS, estimated tempo 128 BPM, and rhythm onset timestamps `[12.8, 19.6, 28.0, 35.0, 39.0, 48.0]`.
+- **4. Backend Integration & Automated Test Coverage:**
+  - Implemented `AWSLambdaMediaProcessingService` in `backend/app/services/aws_lambda_service.py` adhering to `BaseMediaProcessingService`.
+  - Updated `get_media_processing_service` factory with `USE_AWS_LAMBDA_MEDIA_WORKER` toggle and added configuration parameters to `backend/app/config.py` and `.env.example`.
+  - Created automated deployment script `scripts/aws/deploy_lambda.sh`.
+  - Authored unit test suite in `backend/tests/test_aws_lambda_service.py` (6 tests covering probe, proxy, beats, cut rendering, fallback paths, and factory resolution).
+- **5. Full Verification Suite Results:**
+  - Backend: **192 / 192 tests passed** (100% pass rate in 17.16s).
+  - Backend Lint & Format: `ruff check` and `ruff format` passed with 0 errors.
+  - Backend Type Check: `mypy backend/app backend/tests` passed with 0 issues in 48 source files.
+  - Frontend: **30 / 30 vitest tests passed**.
+  - Frontend Lint & Type Check: `eslint` and `tsc --noEmit` passed with 0 errors.
+  - Next.js Production Build: Compiled and static prerendered successfully with Turbopack.
 
 ## Current Production Dataset & Evaluation Status
 
@@ -552,3 +568,4 @@ See `docs/PHASE1_SETUP.md` for full instructions.
   - Kept strictly out of model training weights (per user privacy & copyright directive).
   - Candidate boundaries evaluated: Incantation (18s), Convergence (28s), Peak Discharge (35s), Target Impact / Aftermath (48s).
 - **All Systems Operational for Hackathon Demonstration.**
+

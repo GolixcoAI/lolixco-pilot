@@ -806,6 +806,14 @@ def get_media_processing_service(
         settings = app.config.get_settings()
     if settings.APP_ENV == "test":
         return MockMediaProcessingService()
+    if settings.USE_AWS_LAMBDA_MEDIA_WORKER:
+        from app.services.aws_lambda_service import AWSLambdaMediaProcessingService
+
+        return AWSLambdaMediaProcessingService(
+            function_name=settings.AWS_LAMBDA_MEDIA_FUNCTION,
+            region_name=settings.AWS_REGION,
+            bucket_name=settings.AWS_S3_BUCKET,
+        )
     if settings.USE_MODAL_MEDIA_WORKER:
         from app.services.modal_media_service import ModalMediaProcessingService
 
