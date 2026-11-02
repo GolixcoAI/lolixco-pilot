@@ -692,3 +692,138 @@ def test_create_candidate_from_proposal() -> None:
     assert len(sample.representative_frames) == 2
     assert sample.representative_frames[0].timecode == "00:15.00"
     assert sample.representative_frames[1].timecode == "00:30.00"
+
+
+def test_cli_main_run_training_without_dataset_fails_closed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When --run-training is requested without an explicit dataset, it fails closed."""
+    code = cli_main(
+        [
+            "--config",
+            "training/configs/muse_glimmer_30b_qlora.yml",
+            "--run-training",
+        ]
+    )
+    captured = capsys.readouterr().out
+    assert code == 1
+    assert "Production training requires an explicit dataset path via --dataset" in captured
+
+
+def test_cli_main_run_training_with_synthetic_fixtures_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When supplied dataset has only synthetic fixtures, production training fails closed."""
+    dataset_file = tmp_path / "synthetic_only.jsonl"
+    fixtures = create_seed_dataset()
+    with open(dataset_file, "w", encoding="utf-8") as f:
+        for s in fixtures:
+            f.write(s.model_dump_json() + "\n")
+
+    code = cli_main(
+        [
+            "--config",
+            "training/configs/muse_glimmer_30b_qlora.yml",
+            "--dataset",
+            str(dataset_file),
+            "--run-training",
+        ]
+    )
+    captured = capsys.readouterr().out
+    assert code == 1
+    assert "contains 0 verified genuine samples" in captured
+
+
+def test_cli_main_run_training_with_restricted_clip_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When supplied dataset contains user-restricted private clips, training fails closed."""
+    dataset_file = tmp_path / "with_restricted.jsonl"
+    img1 = tmp_path / "frame1.png"
+    img2 = tmp_path / "frame2.png"
+    create_fixture_image(img1, width=128, height=64)
+    create_fixture_image(img2, width=128, height=64)
+
+    # Create one genuine-looking sample marked as restricted
+    sample = AnimeEventSample(
+        sample_id="restricted_clip_01",
+        source_title="Private Anime Clip",
+        franchise="Private Anime",
+        source_video_id="private_vid_01",
+        duration_seconds=30.0,
+        character_names=["Private Char"],
+        event_name="Secret Technique",
+        approx_start_seconds=5.0,
+        peak_frame_timestamp=10.0,
+        approx_end_seconds=15.0,
+        rights_or_permission_status="user_private_evaluation_clip_restricted",
+        annotation_status="verified",
+        annotation_source="human_annotator",
+        representative_frames=[
+            RepresentativeFrame(
+                timestamp_seconds=5.0,
+                timecode="00:05.00",
+                frame_type="setup",
+                description="Technique setup",
+                image_path=str(img1),
+                width=128,
+                height=64,
+            ),
+            RepresentativeFrame(
+                timestamp_seconds=10.0,
+                timecode="00:10.00",
+                frame_type="peak",
+                description="Technique discharge",
+                image_path=str(img2),
+                width=128,
+                height=64,
+            ),
+        ],
+    )
+    with open(dataset_file, "w", encoding="utf-8") as f:
+        f.write(sample.model_dump_json() + "\n")
+
+    code = cli_main(
+        [
+            "--config",
+            "training/configs/muse_glimmer_30b_qlora.yml",
+            "--dataset",
+            str(dataset_file),
+            "--run-training",
+        ]
+    )
+    captured = capsys.readouterr().out
+    assert code == 1
+    assert "restricted items" in captured or "0 verified genuine samples" in captured
+
+
+def test_docmatix_smoke_dataset_manifest_integrity() -> None:
+    """Verify that the 16-sample Docmatix smoke manifest is correctly formatted."""
+    smoke_jsonl = Path("training/data/docmatix_smoke/docmatix_smoke_16.jsonl")
+    if not smoke_jsonl.exists():
+        pytest.skip("Docmatix smoke dataset not yet prepared locally")
+
+    samples = []
+    with open(smoke_jsonl, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                samples.append(json.loads(line))
+
+    assert len(samples) == 16
+    for idx, s in enumerate(samples):
+        assert s["id"] == f"docmatix_smoke_{idx:02d}"
+        assert s["source"] == "HuggingFaceM4/Docmatix"
+        assert len(s["messages"]) == 2
+        assert s["messages"][0]["role"] == "user"
+        assert s["messages"][1]["role"] == "assistant"
+        # User message has image placeholder and text query
+        user_content = s["messages"][0]["content"]
+        assert any(c.get("type") == "image" for c in user_content)
+        assert any(c.get("type") == "text" and len(c.get("text", "")) > 0 for c in user_content)
+        # Assistant has response text
+        asst_content = s["messages"][1]["content"]
+        assert any(c.get("type") == "text" and len(c.get("text", "")) > 0 for c in asst_content)
+        # Verify physical image exists
+        for img_path in s["images"]:
+            assert Path(img_path).exists()

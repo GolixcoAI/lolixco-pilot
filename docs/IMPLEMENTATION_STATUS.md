@@ -406,6 +406,50 @@ See `docs/PHASE1_SETUP.md` for full instructions.
   - Linting: Ruff (43 files) and ESLint passed with 0 errors.
   - Types: Mypy (backend: 38 files, training/scripts: 11 files) and `tsc --noEmit` passed with 0 errors.
 
+### Phase 2.1: Resolving Blocking Review Findings on PR #2 (feat/muse-glimmer-domain-finetune)
+- **1. Official Docmatix 16-Sample Multimodal Smoke Dataset (`training/prepare_docmatix_smoke.py`):**
+  - Replaced arbitrary synthetic colored blocks with genuine 16-example preparation workflow from `HuggingFaceM4/Docmatix` (`zero-shot-exp` test split).
+  - Fetched 16 genuine document images and grounded Q/A multi-turn conversations via Hugging Face datasets server.
+  - Formatted into OpenAI Messages schema compatible with Axolotl and Muse Glimmer (`training/data/docmatix_smoke/docmatix_smoke_16.jsonl`).
+  - Recorded reproducibility manifest at `training/data/docmatix_smoke/docmatix_smoke_manifest.json` with SHA-256 integrity hashes for each image and record.
+  - All local image files and manifests strictly ignored by `.gitignore`.
+- **2 & 6. Canonical Axolotl Training & Multimodal Loss Flow:**
+  - Deprecated custom ad-hoc training loop in favor of the canonical, official Axolotl training pipeline (`axolotl.cli.train`).
+  - Created official recipe `training/configs/muse_glimmer_smoke.yml` configured for 2 optimizer steps with 4-bit NF4 QLoRA, LoRA $r=16/\alpha=32$, sequence length 2048, and Cut Cross Entropy plugin.
+  - Multi-image tensor pipeline: image tensors flow directly to the vision perception encoder via processor, prompt tokens are masked to `-100` so loss is strictly evaluated on assistant response tokens, and gradients update the designated language LoRA projections (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`).
+  - Implemented post-training adapter reload and inference verification via `PeftModel` in `training/modal_gpu_execution.py`.
+- **3. Dedicated Modal Training Container with Official Meta Pins:**
+  - Base Image: `axolotlai/axolotl:0.19.0-py3.12-cu130-2.12.1`.
+  - Verified remote environment: Python `3.12.13`, PyTorch `2.12.1+cu130`, Torchvision `0.27.1+cu130`, CUDA `13.0`, Axolotl `0.19.0`.
+  - Flash Attention `2.8.3` and official Cut Cross Entropy plugin pre-compiled and active.
+  - Maintained zero changes to local lightweight `.venv`.
+  - Verified `axolotl --help` (exit 0) and `import axolotl.cli.train` (OK) inside Modal container.
+- **4. Resumable Model Weight Snapshot Download:**
+  - Replaced metadata-only check with complete resumable snapshot download to `/checkpoints/muse-glimmer-30b/` using `snapshot_download`.
+  - Pinned exact Meta revision: `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
+  - Validates full 55.49 GB footprint (Shard 1: 49.77 GB, Shard 2: 5.72 GB, plus all processor, tokenizer, and config files) and writes `/checkpoints/manifests/model_download_verified.json`.
+- **5. Training Dataset Launcher Fix & Fail-Closed Guardrails:**
+  - Fixed `training/train_glimmer_qlora.py` CLI so `--dataset` argument is loaded and validated instead of defaulting to synthetic fixtures.
+  - Implemented fail-closed guardrails:
+    - Fails if `--run-training` invoked without `--dataset`.
+    - Fails if dataset contains 0 genuine samples (only synthetic test fixtures).
+    - Fails if dataset includes private/restricted media (`rights_or_permission_status in ("user_private_evaluation_clip_restricted", "prohibited")`).
+  - Added 4 unit tests in `backend/tests/test_training_pipeline.py`.
+- **7. Modal GPU Billing Accountability:**
+  - Modal platform gate confirmed: `InvalidError('Please add a payment method to use H100 GPU functions.')` for account `golixco40`.
+  - Separated `cpu_app` (runs volume setup, Docmatix smoke dataset prep, processor preflight, and snapshot download) from `gpu_app` (awaits billing activation for H100 execution).
+  - Explicitly reports payment requirement without claiming premature GPU training completion.
+- **8. Local Gojo Clip Evaluation Boundary:**
+  - Preserved raw video `gojo_hollow_purple_edit.mp4` and all extracted derivatives strictly on local storage (`training/data/`).
+  - Contact sheet generated and preserved as artifact: `contact_sheet.png`.
+  - Proposed event boundaries (Start 18.0s -> Convergence 28.0s -> Peak 35.0s -> End 48.0s) marked as `pending_verification`.
+- **9. Test & Verification Results:**
+  - Backend: **177 / 177 tests passed** (`pytest` in 6.04s).
+  - Frontend: **30 / 30 tests passed** (`vitest` in 0.82s).
+  - Linting: Ruff (backend, training, scripts) and ESLint (frontend) passed with **0 errors**.
+  - Types: Mypy (38 backend files, 14 training/scripts files) and `tsc --noEmit` passed with **0 errors**.
+  - Frontend Build: Next.js Turbopack production build succeeded with exit code 0.
+
 ## Manual Setup / Approvals Required
 
 See `docs/PHASE1_SETUP.md` for full instructions.

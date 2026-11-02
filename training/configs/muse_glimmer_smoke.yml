@@ -1,0 +1,76 @@
+# LolixCopilot — Muse Glimmer 30B Multimodal QLoRA Smoke Test Configuration
+# Framework: Axolotl (0.19.0) / Official Meta Recipe
+# Target: Bounded 2-step GPU verification on 1x NVIDIA H100 (80GB)
+
+base_model: /checkpoints/muse-glimmer-30b
+base_model_revision: a4e59da52a7bc87ae7251dd5545c0dd437c44b68
+model_type: AutoModelForCausalLM
+tokenizer_type: AutoTokenizer
+image_processor_type: AutoProcessor
+skip_prepare_dataset: true
+remove_unused_columns: false
+
+# 4-bit Quantization (NormalFloat4 + Double Quantization)
+load_in_4bit: true
+load_in_8bit: false
+bnb_4bit_quant_type: nf4
+bnb_4bit_use_double_quant: true
+bnb_4bit_compute_dtype: bfloat16
+
+# LoRA Configuration (Meta official cookbook recipe: frozen vision tower & projector)
+adapter: qlora
+freeze_vision_tower: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+
+# Dataset: Official 16-example Docmatix smoke subset (OpenAI Messages format)
+datasets:
+  - path: /checkpoints/smoke_dataset/docmatix_smoke_16.jsonl
+    type: chat_template
+    chat_template: default
+
+val_set_size: 0.0
+output_dir: /checkpoints/training-runs/smoke_qlora_step2
+
+# Memory & Sequence Settings
+sequence_len: 2048
+sample_packing: false
+eval_sample_packing: false
+pad_to_sequence_len: false
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+flash_attention: true
+
+# Cut Cross Entropy Plugin
+plugins:
+  - axolotl.integrations.cut_cross_entropy.CutCrossEntropyPlugin
+
+# Optimization Schedule (Bounded 2 optimizer steps)
+micro_batch_size: 1
+gradient_accumulation_steps: 8
+max_steps: 2
+save_steps: 2
+logging_steps: 1
+optimizer: paged_adamw_8bit
+learning_rate: 0.0002
+lr_scheduler: cosine
+warmup_steps: 0
+weight_decay: 0.01
+max_grad_norm: 1.0
+
+# Precision & Saving
+bf16: true
+fp16: false
+tf32: true
+save_total_limit: 1
+save_safetensors: true

@@ -597,6 +597,26 @@ def run_pipeline_dry_run(
         "estimated_duration_hours": 2.0,
         "estimated_cost_usd": 7.90,
         "checks": checks,
+        "genuine_sample_count": sum(
+            1
+            for s in samples
+            if getattr(s, "annotation_status", "") != "fixture"
+            and getattr(s, "annotation_source", "") != "test_fixture_seed"
+        ),
+        "synthetic_fixture_count": sum(
+            1
+            for s in samples
+            if getattr(s, "annotation_status", "") == "fixture"
+            or getattr(s, "annotation_source", "") == "test_fixture_seed"
+        ),
+        "restricted_clip_count": sum(
+            1
+            for s in samples
+            if getattr(s, "rights_or_permission_status", "")
+            in ("user_private_evaluation_clip_restricted", "prohibited")
+        ),
+        "loaded_samples_count": len(samples),
+        "dataset_source": dataset_source,
     }
 
     add_check(
@@ -865,14 +885,70 @@ def cli_main(argv: list[str] | None = None) -> int:
                 print(f"  - {blocker}")
             return 1
 
+        # Enforce fail-closed dataset rules
+        if not args.dataset:
+            print(
+                "\n[BLOCKED] Production training requires an explicit dataset path via --dataset.\n"
+                "Running real training with default synthetic fixtures is prohibited to prevent model degradation."
+            )
+            return 1
+
+        dataset_path = Path(args.dataset)
+        if not dataset_path.is_file():
+            print(f"\n[BLOCKED] Supplied dataset file not found: {args.dataset}")
+            return 1
+
+        loaded_samples: list[AnimeEventSample] = []
+        with open(dataset_path, encoding="utf-8") as f:
+            for line in f:
+                line_str = line.strip()
+                if line_str:
+                    loaded_samples.append(AnimeEventSample(**json.loads(line_str)))
+
+        genuine_samples = [
+            s
+            for s in loaded_samples
+            if getattr(s, "annotation_status", "") != "fixture"
+            and getattr(s, "annotation_source", "") != "test_fixture_seed"
+            and getattr(s, "rights_or_permission_status", "")
+            not in ("user_private_evaluation_clip_restricted", "prohibited")
+        ]
+
+        if not genuine_samples:
+            print(
+                f"\n[BLOCKED] Production training failed closed: dataset '{args.dataset}' "
+                f"contains 0 verified genuine samples ({len(loaded_samples)} items total: fixtures or restricted). "
+                "Real domain fine-tuning requires verified, permitted video data."
+            )
+            return 1
+
+        restricted_items = [
+            s
+            for s in loaded_samples
+            if getattr(s, "rights_or_permission_status", "")
+            in ("user_private_evaluation_clip_restricted", "prohibited")
+        ]
+        if restricted_items:
+            print(
+                f"\n[BLOCKED] Production training failed closed: dataset contains {len(restricted_items)} "
+                "restricted items (user_private_evaluation_clip_restricted). "
+                "Uploading or training on restricted user footage is strictly prohibited."
+            )
+            return 1
+
         print("\n" + "!" * 80)
         print("WARNING: Real training requested. Preparing Modal job...")
+        print(
+            f"Dataset: {args.dataset} ({len(genuine_samples)} genuine samples verified)"
+        )
         print("Cost: ~$3.95/hr on 1x NVIDIA H100 (80GB). Estimated total: ~$7.90 USD.")
         print("!" * 80)
         with open(args.config, encoding="utf-8") as f:
             cfg_text = f.read()
-        seed_data = create_seed_dataset()
-        data_text = "\n".join([str(sample.model_dump_json()) for sample in seed_data])
+
+        data_text = "\n".join(
+            [str(sample.model_dump_json()) for sample in genuine_samples]
+        )
         res = train_glimmer_qlora_remote.remote(cfg_text, data_text)
         print("Training Result:", res)
 
