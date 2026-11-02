@@ -36,19 +36,9 @@ logger = logging.getLogger("lolixcopilot.training")
 # Modal Image, App & Volume Definition
 # ---------------------------------------------------------------------------
 
-training_image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git", "curl")
-    .pip_install(
-        "torch>=2.4.0",
-        "transformers>=4.45.0",
-        "peft>=0.13.0",
-        "bitsandbytes>=0.43.0",
-        "accelerate>=0.34.0",
-        "pydantic>=2.10.0",
-        "pyyaml>=6.0.0",
-    )
-)
+training_image = modal.Image.from_registry(
+    "axolotlai/axolotl:0.19.0-py3.12-cu130-2.12.1"
+).env({"PATH": "/workspace/axolotl-venv/bin:/usr/local/bin:/usr/bin:/bin"})
 
 app = modal.App(
     name="lolixcopilot-muse-glimmer-training",
@@ -810,7 +800,14 @@ def train_glimmer_qlora_remote(
             logger.info("Resuming training from latest checkpoint: %s", latest_ckpt)
             resume_flag = ["--resume_from_checkpoint", latest_ckpt]
 
-    cmd = ["accelerate", "launch", "-m", "axolotl.cli.train", config_path, *resume_flag]
+    cmd = [
+        "/workspace/axolotl-venv/bin/accelerate",
+        "launch",
+        "-m",
+        "axolotl.cli.train",
+        config_path,
+        *resume_flag,
+    ]
     logger.info("Executing training: %s", " ".join(cmd))
     proc = subprocess.run(cmd, check=True)
 

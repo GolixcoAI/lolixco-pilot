@@ -6,7 +6,7 @@ base_model: /checkpoints/muse-glimmer-30b
 base_model_revision: a4e59da52a7bc87ae7251dd5545c0dd437c44b68
 model_type: AutoModelForCausalLM
 tokenizer_type: AutoTokenizer
-image_processor_type: AutoProcessor
+processor_type: AutoProcessor
 skip_prepare_dataset: true
 remove_unused_columns: false
 

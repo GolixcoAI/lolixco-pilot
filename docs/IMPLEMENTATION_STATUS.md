@@ -404,33 +404,30 @@ See `docs/PHASE1_SETUP.md` for full instructions.
   - Backend: **173 / 173 tests passed** (`.venv/bin/pytest backend/tests`).
   - Frontend: **30 / 30 tests passed** (`npm --prefix frontend test -- --run`).
   - Linting: Ruff (43 files) and ESLint passed with 0 errors.
-  - Types: Mypy (backend: 38 files, training/scripts: 11 files) and `tsc --noEmit` passed with 0 errors.
-
-### Phase 2.1: Resolving Blocking Review Findings on PR #2 (feat/muse-glimmer-domain-finetune)
+  - Types: Mypy (backend: 38 files, training/scripts: 11 files) and `tsc --noEmit` p### Phase 2.1: Resolving Blocking Review Findings on PR #2 (feat/muse-glimmer-domain-finetune)
 - **1. Official Docmatix 16-Sample Multimodal Smoke Dataset (`training/prepare_docmatix_smoke.py`):**
-  - Replaced arbitrary synthetic colored blocks with genuine 16-example preparation workflow from `HuggingFaceM4/Docmatix` (`zero-shot-exp` test split).
-  - Fetched 16 genuine document images and grounded Q/A multi-turn conversations via Hugging Face datasets server.
-  - Formatted into OpenAI Messages schema compatible with Axolotl and Muse Glimmer (`training/data/docmatix_smoke/docmatix_smoke_16.jsonl`).
+  - Replaced arbitrary synthetic colored blocks with genuine 16-example preparation workflow from `HuggingFaceM4/Docmatix` (`train` split, revision `0725b65616e0e5f6024be10e38ddf8d8c48664fd`).
+  - Fetched 16 genuine high-resolution document images and grounded Q/A multi-turn conversations via Hugging Face datasets server.
+  - License metadata properly recorded as `MIT` (per official Docmatix dataset card).
+  - Formatted into OpenAI Messages schema compatible with Axolotl and Muse Glimmer with inline image paths: `{"type": "image", "path": ...}` and `"images": [...]`.
+  - Stored at `/checkpoints/smoke_dataset/docmatix_smoke_16.jsonl` with real PNG files in `/checkpoints/smoke_dataset/images/`.
   - Recorded reproducibility manifest at `training/data/docmatix_smoke/docmatix_smoke_manifest.json` with SHA-256 integrity hashes for each image and record.
-  - All local image files and manifests strictly ignored by `.gitignore`.
 - **2 & 6. Canonical Axolotl Training & Multimodal Loss Flow:**
-  - Deprecated custom ad-hoc training loop in favor of the canonical, official Axolotl training pipeline (`axolotl.cli.train`).
-  - Created official recipe `training/configs/muse_glimmer_smoke.yml` configured for 2 optimizer steps with 4-bit NF4 QLoRA, LoRA $r=16/\alpha=32$, sequence length 2048, and Cut Cross Entropy plugin.
-  - Multi-image tensor pipeline: image tensors flow directly to the vision perception encoder via processor, prompt tokens are masked to `-100` so loss is strictly evaluated on assistant response tokens, and gradients update the designated language LoRA projections (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`).
-  - Implemented post-training adapter reload and inference verification via `PeftModel` in `training/modal_gpu_execution.py`.
+  - Standardized on the canonical, official Axolotl training pipeline (`axolotl.cli.train`).
+  - Created official recipe `training/configs/muse_glimmer_smoke.yml` configured with `processor_type: AutoProcessor` (removed deprecated `image_processor_type`).
+  - Configured for 2 optimizer steps with 4-bit NF4 QLoRA, LoRA $r=16/\alpha=32$, sequence length 2048, and Cut Cross Entropy plugin.
+  - Multi-image tensor pipeline: image tensors flow directly to the vision perception encoder via AutoProcessor, prompt tokens are masked to `-100` so loss is strictly evaluated on assistant response tokens, and gradients update language LoRA projections (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`).
 - **3. Dedicated Modal Training Container with Official Meta Pins:**
   - Base Image: `axolotlai/axolotl:0.19.0-py3.12-cu130-2.12.1`.
-  - Verified remote environment: Python `3.12.13`, PyTorch `2.12.1+cu130`, Torchvision `0.27.1+cu130`, CUDA `13.0`, Axolotl `0.19.0`.
+  - Verified remote environment: Python `3.12.13`, PyTorch `2.12.1+cu130`, Torchvision `0.27.1+cu130`, CUDA `13.0`, Transformers `5.16.1` (satisfies `>=5.15.0`), Axolotl `0.19.0`.
   - Flash Attention `2.8.3` and official Cut Cross Entropy plugin pre-compiled and active.
-  - Maintained zero changes to local lightweight `.venv`.
-  - Verified `axolotl --help` (exit 0) and `import axolotl.cli.train` (OK) inside Modal container.
-- **4. Resumable Model Weight Snapshot Download (Completed & Verified Live):**
-  - Replaced metadata-only check with complete resumable snapshot download to `/checkpoints/muse-glimmer-30b/` using `snapshot_download`.
+  - Zero changes to local lightweight `.venv`.
+- **4. Resumable Model Weight Snapshot Download (Verified Live):**
+  - Downloaded to `/checkpoints/muse-glimmer-30b/` using `snapshot_download` from `meta-models/Muse-Glimmer-30B`.
   - Pinned exact Meta revision: `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
-  - Successfully downloaded and verified live on Modal (`https://modal.com/apps/golixco40/main/ap-bqqPoqrrj8EThC1y1TCoKy`):
-    - Full 55.49 GB footprint committed to volume `lolixcopilot-checkpoints`.
+  - Full 55.49 GB footprint committed to volume `lolixcopilot-checkpoints`:
     - Shards verified: `model-00001-of-00002.safetensors` (49.77 GB) and `model-00002-of-00002.safetensors` (5.72 GB).
-    - All 6 processor, tokenizer, and config files verified.
+    - All processor, tokenizer, and config files verified.
     - Manifest recorded to `/checkpoints/manifests/model_download_verified.json` with status `verified`.
 - **5. Training Dataset Launcher Fix & Fail-Closed Guardrails:**
   - Fixed `training/train_glimmer_qlora.py` CLI so `--dataset` argument is loaded and validated instead of defaulting to synthetic fixtures.
@@ -439,48 +436,55 @@ See `docs/PHASE1_SETUP.md` for full instructions.
     - Fails if dataset contains 0 genuine samples (only synthetic test fixtures).
     - Fails if dataset includes private/restricted media (`rights_or_permission_status in ("user_private_evaluation_clip_restricted", "prohibited")`).
   - Added 4 unit tests in `backend/tests/test_training_pipeline.py`.
-- **7. Modal GPU Billing Accountability:**
-  - Modal platform gate confirmed: `InvalidError('Please add a payment method to use H100 GPU functions.')` for account `golixco40`.
-  - Separated `cpu_app` (runs volume setup, Docmatix smoke dataset prep, processor preflight, and snapshot download) from `gpu_app` (awaits billing activation for H100 execution).
-  - Explicitly reports payment requirement without claiming premature GPU training completion.
-- **8. Local Gojo Clip Evaluation Boundary:**
+- **6. Synthetic Fallback Removal:**
+  - Removed all synthetic colored-image fallback logic from `training/modal_gpu_execution.py`.
+  - `run_multimodal_processor_preflight` and `reload_adapter_and_infer` fail with clear `FileNotFoundError` if real image assets are missing.
+- **7. Local Gojo Clip Evaluation Boundary:**
   - Preserved raw video `gojo_hollow_purple_edit.mp4` and all extracted derivatives strictly on local storage (`training/data/`).
   - Contact sheet generated and preserved as artifact: `contact_sheet.png`.
-  - Proposed event boundaries (Start 18.0s -> Convergence 28.0s -> Peak 35.0s -> End 48.0s) marked as `pending_verification`.
-- **9. Test & Verification Results:**
-  - Backend: **177 / 177 tests passed** (`pytest` in 6.04s).
-  - Frontend: **30 / 30 tests passed** (`vitest` in 0.82s).
+  - Zero external uploads to Modal, S3, Meta, or Baseten.
+
+### Phase 2.2: Modal H100 GPU Training & Multimodal Inference (Live Execution Completed)
+- **Account & Billing Verification:**
+  - Modal Account: `golixco40`. Payment method verified active. Available credits: ~$142.
+  - Meta API: `$100` promotional credit verified via `MODEL_API_KEY` probe (`GET https://api.meta.ai/v1/models` -> HTTP 200).
+- **Hardware Verification (NVIDIA H100 80GB HBM3):**
+  - Device: `NVIDIA H100 80GB HBM3`
+  - VRAM: `79.17 GB` (85,005,172,736 bytes)
+  - Compute Capability: `9.0` (SM90a Hopper architecture)
+  - CUDA: `13.0`
+  - BF16: Supported
+- **Axolotl 2-Step QLoRA Training Run:**
+  - Tool: `accelerate launch -m axolotl.cli.train /checkpoints/configs/muse_glimmer_smoke.yml`
+  - Dataset: 16 genuine Docmatix document training examples (`/checkpoints/smoke_dataset/docmatix_smoke_16.jsonl`).
+  - Axolotl Exit Code: `0` (Success)
+  - Duration: `182.68s` (total run time ~3.0 min)
+  - Training Step 1 Loss: `3.086` (grad_norm: `43.10`, lr: `0.0002`, peak allocated VRAM: `39.76 GiB`, reserved: `42.12 GiB`)
+  - Training Step 2 Loss: `2.1422` (grad_norm: `18.18`, lr: `0.0001`, peak allocated VRAM: `39.68 GiB`, reserved: `42.16 GiB`)
+  - Total FLOS: `1.68e+16`
+  - Checkpoint Saved: `/checkpoints/training-runs/smoke_qlora_step2/checkpoint-2` and final adapter at `/checkpoints/training-runs/smoke_qlora_step2/`
+  - Adapter Artifact: `adapter_model.safetensors` (`448,828,032 bytes`, ~448.8 MB) + `adapter_config.json`.
+- **QLoRA Adapter Reload & Multimodal Inference Verification:**
+  - Base Model: Loaded in 4-bit NF4 (`BitsAndBytesConfig` skipping `model.vision_tower` and `model.multi_modal_projector` so the ViT encoder remains in native BF16, avoiding byte-tensor quantization errors in `nn.LayerNorm`).
+  - Class: `AutoModelForImageTextToText` (`MuseGlimmerForConditionalGeneration`).
+  - Adapter Reload: Loaded via `PeftModel.from_pretrained(base_model, adapter_dir)`.
+  - Image Asset: Genuine Docmatix document `sample_000_img_0.png`.
+  - Prompt: *"What is the primary topic of this document?"*
+  - Generated Output:
+    > *"The document is Companies House Confirmation Statement CS01 (ef) for HERBERT ULRICH FRICK LTD. Company Number 07101641. Received for filing in Electronic Format on 23/03/2021. Confirmation Statement date 11/12/"*
+  - Inference Status: `success`
+- **End-to-End Pipeline Run:**
+  - Modal App: `https://modal.com/apps/golixco40/main/ap-jE4KPMwMTr32sDvPjozO2E`
+  - Command: `modal run training/modal_gpu_execution.py::gpu_app` executed and exited with code `0`.
+- **Test Results & Verification:**
+  - Backend: **177 / 177 tests passed** (`pytest` in 11.02s).
+  - Frontend: **30 / 30 tests passed** (`vitest` in 0.56s).
   - Linting: Ruff (backend, training, scripts) and ESLint (frontend) passed with **0 errors**.
-  - Types: Mypy (38 backend files, 14 training/scripts files) and `tsc --noEmit` passed with **0 errors**.
-  - Frontend Build: Next.js Turbopack production build succeeded with exit code 0.
+  - Types: Mypy (38 backend source files) and `tsc --noEmit` passed with **0 errors**.
+  - `npm run check:all`: Passed with exit code 0.
 
-## Manual Setup / Approvals Required
+## Current Production Dataset & Evaluation Status
 
-See `docs/PHASE1_SETUP.md` for full instructions.
-
-### 1. Modal GPU Billing Activation (Required for GPU Step)
-- Modal Account: `golixco40`
-- Action: Add credit card at `https://modal.com/settings/billing`
-- Once added, run: `modal run training/modal_gpu_execution.py::gpu_app` to execute the H100 hardware check and bounded 2-optimizer-step QLoRA smoke training.
-
-### 2. Gojo Hollow Purple Annotation Verification
-- Review proposed boundaries in `training/data/local_eval/gojo_hollow_purple/annotation_proposal.json`:
-  - Start: `18.0s`
-  - Peak: `35.0s`
-  - End: `48.0s`
-- Confirm or adjust boundaries before promoting clip to evaluation gold-standard.
-
-### 3. Baseten Inference Configuration
-- Model: `meta-models/muse-spark-open-1026`
-- Base URL: `https://inference.baseten.co/v1`
-- Variable present: `BASETEN_API_KEY` configured.
-
-### 4. Meta Model API Configuration
-- Model: `muse-spark-1.3`
-- Base URL: `https://api.meta.ai/v1`
-- Variable: `MODEL_API_KEY` (optional; if not set, system works with Baseten).
-
-### 5. AWS S3 Storage (Completed & Verified)
-- Dedicated Bucket: `lolixcopilot-media-247673029886-ap-south-1`
-- Region: `ap-south-1`
-- Configuration: Private, SSE-S3 encrypted, restricted CORS, 7-day auto-expiration on `users/`.
+- **Genuine Production Dataset Samples:** `0` (Docmatix 16-sample set is strictly an infrastructure smoke test; 7 synthetic samples are unit test fixtures).
+- **Private Video Asset:** Gojo Hollow Purple clip remains strictly local (`training/data/raw/gojo_hollow_purple_edit.mp4`), pending visual verification by user.
+- **Next Step:** Curate genuine LolixCopilot temporal visual-event training examples (target: 500+ verified multi-frame clips with ground-truth temporal boundaries) using the verified H100 QLoRA training harness.

@@ -800,6 +800,7 @@ def test_cli_main_run_training_with_restricted_clip_fails_closed(
 def test_docmatix_smoke_dataset_manifest_integrity() -> None:
     """Verify that the 16-sample Docmatix smoke manifest is correctly formatted."""
     smoke_jsonl = Path("training/data/docmatix_smoke/docmatix_smoke_16.jsonl")
+    manifest_file = Path("training/data/docmatix_smoke/docmatix_smoke_manifest.json")
     if not smoke_jsonl.exists():
         pytest.skip("Docmatix smoke dataset not yet prepared locally")
 
@@ -814,12 +815,15 @@ def test_docmatix_smoke_dataset_manifest_integrity() -> None:
     for idx, s in enumerate(samples):
         assert s["id"] == f"docmatix_smoke_{idx:02d}"
         assert s["source"] == "HuggingFaceM4/Docmatix"
+        assert s["split"] == "train"
+        assert s["revision"] == "0725b65616e0e5f6024be10e38ddf8d8c48664fd"
         assert len(s["messages"]) == 2
         assert s["messages"][0]["role"] == "user"
         assert s["messages"][1]["role"] == "assistant"
-        # User message has image placeholder and text query
+        # User message has image with path and text query
         user_content = s["messages"][0]["content"]
-        assert any(c.get("type") == "image" for c in user_content)
+        img_item = next(c for c in user_content if c.get("type") == "image")
+        assert "path" in img_item and Path(img_item["path"]).exists()
         assert any(c.get("type") == "text" and len(c.get("text", "")) > 0 for c in user_content)
         # Assistant has response text
         asst_content = s["messages"][1]["content"]
@@ -827,3 +831,9 @@ def test_docmatix_smoke_dataset_manifest_integrity() -> None:
         # Verify physical image exists
         for img_path in s["images"]:
             assert Path(img_path).exists()
+
+    if manifest_file.exists():
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        assert manifest["license"] == "MIT"
+        assert manifest["split"] == "train"
+        assert manifest["dataset_revision"] == "0725b65616e0e5f6024be10e38ddf8d8c48664fd"

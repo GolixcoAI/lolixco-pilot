@@ -7,7 +7,7 @@ base_model: meta-models/Muse-Glimmer-30B
 base_model_revision: a4e59da52a7bc87ae7251dd5545c0dd437c44b68
 model_type: AutoModelForCausalLM
 tokenizer_type: AutoTokenizer
-image_processor_type: AutoProcessor
+processor_type: AutoProcessor
 
 # 4-bit Quantization (NormalFloat4 + Double Quantization for 1x H100 VRAM fit)
 load_in_4bit: true

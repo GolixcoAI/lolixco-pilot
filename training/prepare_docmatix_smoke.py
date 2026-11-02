@@ -1,6 +1,6 @@
 """Prepare the official 16-example Docmatix multimodal smoke dataset.
 
-Uses the official HuggingFaceM4/Docmatix dataset (zero-shot-exp test split),
+Uses the official HuggingFaceM4/Docmatix dataset (zero-shot-exp train split),
 downloading genuine document images and question-answer pairs for the
 multimodal training compatibility experiment.
 
@@ -18,9 +18,15 @@ from typing import Any
 
 logger = logging.getLogger("lolixcopilot.docmatix_smoke")
 
+DOCMATIX_REPO = "HuggingFaceM4/Docmatix"
+DOCMATIX_REVISION = "0725b65616e0e5f6024be10e38ddf8d8c48664fd"
+DOCMATIX_CONFIG = "zero-shot-exp"
+DOCMATIX_SPLIT = "train"
+DOCMATIX_LICENSE = "MIT"
+
 DOCMATIX_ROWS_API = (
     "https://datasets-server.huggingface.co/rows"
-    "?dataset=HuggingFaceM4%2FDocmatix&config=zero-shot-exp&split=test&offset=0&length=16"
+    f"?dataset=HuggingFaceM4%2FDocmatix&config={DOCMATIX_CONFIG}&split={DOCMATIX_SPLIT}&offset=0&length=16"
 )
 
 
@@ -79,13 +85,10 @@ def fetch_docmatix_smoke_subset(
         if not raw_images:
             raise ValueError(f"Sample {sample_id} has no images in Docmatix row")
 
-        # In Docmatix, each row can have 1 or more pages; we download the primary page (or all)
         saved_image_paths: list[str] = []
         image_hashes: list[str] = []
 
-        for img_idx, img_info in enumerate(
-            raw_images[:1]
-        ):  # Use primary page for smoke
+        for img_idx, img_info in enumerate(raw_images[:1]):
             img_url = img_info["src"]
             img_filename = f"{sample_id}_page{img_idx}.png"
             dest_img_path = images_dir / img_filename
@@ -109,26 +112,25 @@ def fetch_docmatix_smoke_subset(
         if not texts:
             raise ValueError(f"Sample {sample_id} has no texts in Docmatix row")
 
-        # Take first Q/A turn
         first_turn = texts[0]
-        user_query = first_turn.get("user", "").strip()
-        assistant_resp = first_turn.get("assistant", "").strip()
+        user_query = first_turn.get("user", "").strip() or "Describe this document."
+        assistant_resp = (
+            first_turn.get("assistant", "").strip() or "Document information extracted."
+        )
 
-        if not user_query or not assistant_resp:
-            raise ValueError(
-                f"Sample {sample_id} has empty user query or assistant response"
-            )
+        primary_image_path = saved_image_paths[0]
 
-        # 3. Format OpenAI messages for Axolotl / Muse Glimmer
-        # Note: Axolotl Muse Glimmer uses {"type": "image"} placeholder + image list
+        # 3. Format OpenAI messages for Axolotl / Muse Glimmer with exact image path
         message_record = {
             "id": sample_id,
-            "source": "HuggingFaceM4/Docmatix",
+            "source": DOCMATIX_REPO,
+            "revision": DOCMATIX_REVISION,
+            "split": DOCMATIX_SPLIT,
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "image"},
+                        {"type": "image", "path": primary_image_path},
                         {"type": "text", "text": user_query},
                     ],
                 },
@@ -147,6 +149,7 @@ def fetch_docmatix_smoke_subset(
             {
                 "id": sample_id,
                 "image_files": [Path(p).name for p in saved_image_paths],
+                "image_paths": saved_image_paths,
                 "image_hashes": image_hashes,
                 "user_query_preview": user_query[:80],
                 "assistant_resp_preview": assistant_resp[:80],
@@ -163,8 +166,11 @@ def fetch_docmatix_smoke_subset(
 
     # 5. Write manifest
     summary = {
-        "dataset_name": "HuggingFaceM4/Docmatix (zero-shot-exp test subset)",
-        "license": "Apache-2.0",
+        "dataset_name": DOCMATIX_REPO,
+        "dataset_revision": DOCMATIX_REVISION,
+        "config": DOCMATIX_CONFIG,
+        "split": DOCMATIX_SPLIT,
+        "license": DOCMATIX_LICENSE,
         "sample_count": len(formatted_samples),
         "jsonl_path": str(jsonl_path.resolve()),
         "jsonl_sha256": calculate_sha256(jsonl_path),
