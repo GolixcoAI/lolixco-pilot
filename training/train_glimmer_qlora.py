@@ -178,14 +178,19 @@ def run_pipeline_dry_run(
     # 4. Trainable / Frozen Parameters
     targets = config.get("lora_target_modules", [])
     freeze_vision = config.get("freeze_vision_tower", True)
-    has_proj = "multi_modal_projector" in targets
     has_attention = {"q_proj", "k_proj", "v_proj", "o_proj"}.issubset(set(targets))
     has_mlp = {"gate_proj", "up_proj", "down_proj"}.issubset(set(targets))
-    if freeze_vision and has_attention and has_mlp and has_proj:
+    has_proj = "multi_modal_projector" in targets
+    if freeze_vision and has_attention and has_mlp:
+        adapter_desc = (
+            "ViT-G/14 perception encoder, vision adapter, and projector frozen; trainable LoRA adapters on language attention (Q,K,V,O) and SwiGLU MLP (official Meta recipe)"
+            if not has_proj
+            else "ViT-G/14 perception encoder frozen; trainable LoRA adapters on attention (Q,K,V,O), SwiGLU MLP, and multimodal projector (experimental ablation)"
+        )
         add_check(
             "Trainable / Frozen Parameters",
             True,
-            "ViT-G/14 perception encoder frozen; trainable LoRA adapters on attention (Q,K,V,O), SwiGLU MLP, and multimodal projector",
+            adapter_desc,
         )
     else:
         add_check(

@@ -343,7 +343,96 @@ See `docs/PHASE1_SETUP.md` for full instructions.
 - Project Reference: `fhfkjviishfvfyawfckh` (Singapore `ap-southeast-1`).
 - Pending Migration: `supabase/migrations/20261101180000_media_intelligence_and_analyses_persistence.sql` ready to apply via Supabase CLI or Dashboard SQL editor when user is ready.
 
-### 5. Modal Workers & Training (Ready for Deployment when Authorized)
-- Deploy CPU Media Worker: `modal deploy workers/media_worker.py` (free until jobs invoked; ~$0.0012 per video).
-- Run Training Offline Dry-Run: `python training/train_glimmer_qlora.py --dry-run` (0 credits).
-- Launch Modal Training (Only when weights & dataset ready): `modal run training/train_glimmer_qlora.py` (resumable, H100 80GB).
+### Phase 2: Muse Glimmer Domain Fine-Tuning, Modal Infrastructure & Local Gojo Video Evaluation
+- **Git Feature Branch:**
+  - Branch: `feat/muse-glimmer-domain-finetune` branched from clean merged main (`e7512dc`).
+  - `.gitignore` updated: strict ignore rules for `training/data/` (including all raw footage, extracted frames, audio WAVs, contact sheets, and manifests) and `checkpoints/` ensuring zero private media or weight artifacts enter source control.
+- **Audit of Meta / Axolotl Official Training Recipe:**
+  - Audited `training/configs/muse_glimmer_30b_qlora.yml` against official Meta OSS Cookbook and Axolotl Muse Glimmer guide.
+  - Aligned LoRA targets to language projections only (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`).
+  - Frozen vision tower (ViT-G/14, `freeze_vision_tower: true`), frozen vision adapter, and frozen multimodal projector per official cookbook. Projector adaptation reserved as an optional documented ablation.
+  - Base model pinned to official Meta commit `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
+- **Persistent Modal Checkpoint Volume Provisioned:**
+  - Volume name: `lolixcopilot-checkpoints`.
+  - Structured storage layout provisioned and verified via Modal CPU runner:
+    - `/checkpoints/muse-glimmer-30b/`
+    - `/checkpoints/adapters/`
+    - `/checkpoints/training-runs/`
+    - `/checkpoints/manifests/`
+    - `/checkpoints/logs/`
+  - Provisioning manifest saved to `/checkpoints/manifests/volume_layout.json`.
+- **Model Weight Verification on Hugging Face:**
+  - Model: `meta-models/Muse-Glimmer-30B` at commit `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
+  - Verified 13 files totaling **55.49 GB** (59,581,829,216 bytes):
+    - `model-00001-of-00002.safetensors`: 49.77 GB
+    - `model-00002-of-00002.safetensors`: 5.72 GB
+    - 6 config/tokenizer files (`config.json`, `generation_config.json`, `processor_config.json`, `tokenizer.json`, `tokenizer_config.json`, `special_tokens_map.json`)
+  - Shard manifest recorded in `/checkpoints/manifests/model_shards_manifest.json`.
+- **Remote Multimodal Processor Preflight:**
+  - Executed on Modal in remote container (`training/modal_gpu_execution.py::cpu_app`).
+  - Successfully instantiated `MuseGlimmerProcessor` with `TokenizersBackend` (vocab size: 202,048).
+  - Multi-image tokenization verified with 2 sample images: prompt token sequence length 199, pixel values tensor shape `[512, 1176]`.
+  - Preflight results recorded in `/checkpoints/manifests/processor_preflight.json`.
+- **First Real-World Video Evaluation (`gojo_hollow_purple_edit.mp4`):**
+  - **Zero Cloud Exposure:** File strictly processed on local machine; zero frames, audio, or embeddings sent to Modal, Baseten, Meta, or any external service.
+  - **Asset Verification:**
+    - File path: `training/data/raw/gojo_hollow_purple_edit.mp4` (git-ignored)
+    - File size: 26,082,107 bytes (~24.87 MB)
+    - SHA-256: `a87f15978aa238d556dd5d159d94deb3a620d463c6b7282c81860d96e53abd63`
+    - Video: AV1 (`libdav1d`), 2560x1440, 30.0 fps, 3066 kb/s, duration 68.08s (2,042 frames)
+    - Audio: AAC stereo, 44,100 Hz, 128 kb/s
+  - **Audio Extraction:**
+    - Converted to local 16kHz mono 16-bit PCM WAV at `training/data/local_eval/gojo_hollow_purple/audio_16k_mono.wav`
+    - Volume analysis: Mean/RMS = -21.6 dBFS, Peak = -0.8 dBFS (no digital clipping)
+  - **Frame Extraction & Contact Sheet:**
+    - 12 chronological keyframes extracted across all narrative phases (0.5s to 66.0s)
+    - High-resolution composite contact sheet generated (`1340x660` RGB) with timecode and phase badges
+    - Copied to artifact directory for UI inspection: `contact_sheet.png`
+  - **Proposed Annotation Generated (`annotation_proposal.json`):**
+    - Source: Jujutsu Kaisen (Season 1 Episode 20 / Kyoto Goodwill Event Arc)
+    - Character: Satoru Gojo
+    - Event: Hollow Purple (Kyoshiki: Murasaki)
+    - Boundaries: Start `18.0s` -> Convergence `28.0s` -> Peak Discharge `35.0s` -> End Aftermath `48.0s`
+    - Status: `PENDING_USER_VERIFICATION` (not automatically marked as ground truth)
+- **Dataset Architecture & Candidate Integration:**
+  - Added `create_candidate_from_proposal(proposal)` in `training/dataset.py` mapping local inspection proposals directly to validated `AnimeEventSample` instances.
+  - Status marked as `pending_verification` with `rights_or_permission_status="user_private_evaluation_clip_restricted"`.
+- **Modal GPU Billing Gate Documented:**
+  - Modal platform policy requires a credit card / payment method on file (`https://modal.com/settings/billing`) before any GPU container (H100, A100, A10G, T4) can be spawned, regardless of credit balance.
+  - Decoupled `training/modal_gpu_execution.py` into `cpu_app` (runs freely on CPU) and `gpu_app` (ready to execute H100 hardware verification and 2-step QLoRA smoke training as soon as payment method is registered).
+- **Test Results & Verification:**
+  - Backend: **173 / 173 tests passed** (`.venv/bin/pytest backend/tests`).
+  - Frontend: **30 / 30 tests passed** (`npm --prefix frontend test -- --run`).
+  - Linting: Ruff (43 files) and ESLint passed with 0 errors.
+  - Types: Mypy (backend: 38 files, training/scripts: 11 files) and `tsc --noEmit` passed with 0 errors.
+
+## Manual Setup / Approvals Required
+
+See `docs/PHASE1_SETUP.md` for full instructions.
+
+### 1. Modal GPU Billing Activation (Required for GPU Step)
+- Modal Account: `golixco40`
+- Action: Add credit card at `https://modal.com/settings/billing`
+- Once added, run: `modal run training/modal_gpu_execution.py::gpu_app` to execute the H100 hardware check and bounded 2-optimizer-step QLoRA smoke training.
+
+### 2. Gojo Hollow Purple Annotation Verification
+- Review proposed boundaries in `training/data/local_eval/gojo_hollow_purple/annotation_proposal.json`:
+  - Start: `18.0s`
+  - Peak: `35.0s`
+  - End: `48.0s`
+- Confirm or adjust boundaries before promoting clip to evaluation gold-standard.
+
+### 3. Baseten Inference Configuration
+- Model: `meta-models/muse-spark-open-1026`
+- Base URL: `https://inference.baseten.co/v1`
+- Variable present: `BASETEN_API_KEY` configured.
+
+### 4. Meta Model API Configuration
+- Model: `muse-spark-1.3`
+- Base URL: `https://api.meta.ai/v1`
+- Variable: `MODEL_API_KEY` (optional; if not set, system works with Baseten).
+
+### 5. AWS S3 Storage (Completed & Verified)
+- Dedicated Bucket: `lolixcopilot-media-247673029886-ap-south-1`
+- Region: `ap-south-1`
+- Configuration: Private, SSE-S3 encrypted, restricted CORS, 7-day auto-expiration on `users/`.
