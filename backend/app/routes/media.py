@@ -371,10 +371,23 @@ async def get_proxy_playback_url(
             detail="Media asset not found or access denied",
         )
 
-    proxy_key = storage.generate_proxy_key(user.user_id, project_id, media_id)
-    proxy_meta = storage.verify_object(proxy_key)
+    s3_event_proxy = (
+        media.s3_object_key.replace("users/", "proxies/", 1).rsplit(".", 1)[0] + "_preview_h264.mp4"
+    )
+    raw_name = media.s3_object_key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    direct_lambda_proxy = f"proxies/{raw_name}_h264.mp4"
+    default_proxy_key = storage.generate_proxy_key(user.user_id, project_id, media_id)
 
-    if not proxy_meta.exists:
+    # Check if proxy already exists under any valid S3 key
+    proxy_key = None
+    if storage.verify_object(s3_event_proxy).exists:
+        proxy_key = s3_event_proxy
+    elif storage.verify_object(direct_lambda_proxy).exists:
+        proxy_key = direct_lambda_proxy
+    elif storage.verify_object(default_proxy_key).exists:
+        proxy_key = default_proxy_key
+
+    if not proxy_key:
         temp_dir = tempfile.mkdtemp(prefix=f"proxy_{media_id}_")
         local_src = os.path.join(temp_dir, "input_source.mp4")
         local_proxy = os.path.join(temp_dir, "preview_h264.mp4")
@@ -389,9 +402,21 @@ async def get_proxy_playback_url(
                 with open(local_src, "wb") as f:
                     f.write(b"MOCK_INPUT_MEDIA")
 
-            ok = await media_processor.generate_h264_proxy(local_src, local_proxy)
-            if ok and os.path.exists(local_proxy):
+            use_lambda = (
+                settings.USE_AWS_LAMBDA_MEDIA_WORKER
+                and not getattr(storage, "is_mock", lambda: False)()
+            )
+            proxy_input = media.s3_object_key if use_lambda else local_src
+            ok = await media_processor.generate_h264_proxy(proxy_input, local_proxy)
+            if storage.verify_object(s3_event_proxy).exists:
+                proxy_key = s3_event_proxy
+            elif storage.verify_object(direct_lambda_proxy).exists:
+                proxy_key = direct_lambda_proxy
+            elif ok and os.path.exists(local_proxy):
+                proxy_key = default_proxy_key
                 storage.upload_file(local_proxy, proxy_key, content_type="video/mp4")
+            else:
+                proxy_key = default_proxy_key
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

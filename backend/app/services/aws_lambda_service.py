@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 
 from app.services.media_processing import (
@@ -36,20 +37,24 @@ class AWSLambdaMediaProcessingService(BaseMediaProcessingService):
         bucket_name: str = "lolixcopilot-media-247673029886-ap-south-1",
         fallback_service: BaseMediaProcessingService | None = None,
         lambda_client: Any = None,
+        s3_client: Any = None,
     ) -> None:
         self.function_name = function_name
         self.region_name = region_name
         self.bucket_name = bucket_name
         self.fallback = fallback_service or LocalMediaProcessingService()
         self._lambda_client = lambda_client
+        self._s3_client = s3_client
 
     def _get_client(self) -> Any:
-        """Resolve or lazily create a boto3 lambda client."""
+        """Resolve or lazily create a boto3 lambda client with 360s read timeout."""
         if self._lambda_client is not None:
             return self._lambda_client
         import boto3
+        from botocore.config import Config
 
-        self._lambda_client = boto3.client("lambda", region_name=self.region_name)
+        cfg = Config(read_timeout=360, connect_timeout=15, retries={"max_attempts": 0})
+        self._lambda_client = boto3.client("lambda", region_name=self.region_name, config=cfg)
         return self._lambda_client
 
     def _invoke_lambda_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -141,6 +146,14 @@ class AWSLambdaMediaProcessingService(BaseMediaProcessingService):
         try:
             data = await self._invoke_lambda(payload)
             if data.get("status") in ("created", "cached"):
+                if output_proxy_path:
+                    try:
+                        import boto3
+
+                        s3_client = self._s3_client or boto3.client("s3", region_name=self.region_name)
+                        s3_client.download_file(self.bucket_name, target_key, output_proxy_path)
+                    except Exception as s3_err:
+                        logger.debug("Optional S3 proxy download skipped: %s", s3_err)
                 return True
         except Exception as exc:
             logger.warning("AWS Lambda proxy generation failed, falling back to local: %s", exc)
@@ -177,22 +190,52 @@ class AWSLambdaMediaProcessingService(BaseMediaProcessingService):
         try:
             data = await self._invoke_lambda(payload)
             if data.get("status") == "success":
+                try:
+                    import boto3
+
+                    s3_client = self._s3_client or boto3.client("s3", region_name=self.region_name)
+                    s3_client.download_file(self.bucket_name, target_key, output_cut_path)
+                except Exception as s3_err:
+                    logger.debug("Optional S3 cut download skipped: %s", s3_err)
                 tot_dur = sum(
                     float(s.get("end_seconds", 0)) - float(s.get("start_seconds", 0))
                     for s in segments
                 )
+                if os.path.exists(output_cut_path):
+                    actual_size = os.path.getsize(output_cut_path)
+                else:
+                    actual_size = data.get("size_bytes", 1024 * 1024 * 5)
                 return RenderCutResult(
                     success=True,
                     output_path=output_cut_path,
                     duration_seconds=round(tot_dur, 2),
-                    file_size_bytes=data.get("size_bytes", 1024 * 1024 * 5),
+                    file_size_bytes=actual_size,
                     segment_count=len(segments),
                 )
         except Exception as exc:
             logger.warning("AWS Lambda render cut failed, falling back to local: %s", exc)
 
+        fallback_input = video_path
+        if fallback_input.startswith(("users/", "s3://")):
+            import tempfile
+
+            import boto3
+
+            try:
+                s3_client = self._s3_client or boto3.client("s3", region_name=self.region_name)
+                s3_key = (
+                    fallback_input.split("/", 3)[-1]
+                    if fallback_input.startswith("s3://")
+                    else fallback_input
+                )
+                with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+                    s3_client.download_file(self.bucket_name, s3_key, tf.name)
+                    fallback_input = tf.name
+            except Exception as s3_err:
+                logger.debug("Fallback S3 download skipped: %s", s3_err)
+
         return await self.fallback.render_edit_cut(
-            video_path=video_path,
+            video_path=fallback_input,
             segments=segments,
             output_cut_path=output_cut_path,
             target_resolution=target_resolution,

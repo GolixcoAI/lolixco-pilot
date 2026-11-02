@@ -90,10 +90,16 @@ async def export_video_cut(
             with open(local_src, "wb") as f:
                 f.write(b"MOCK_SOURCE_VIDEO")
 
+        use_lambda = (
+            settings.USE_AWS_LAMBDA_MEDIA_WORKER
+            and not getattr(storage, "is_mock", lambda: False)()
+        )
+        render_input_path = media.s3_object_key if use_lambda else local_src
+
         # Convert segment models to dicts
         raw_segments = [s.model_dump() for s in payload.segments]
         res = await media_processor.render_edit_cut(
-            video_path=local_src,
+            video_path=render_input_path,
             segments=raw_segments,
             output_cut_path=local_out,
             target_resolution=payload.resolution,
