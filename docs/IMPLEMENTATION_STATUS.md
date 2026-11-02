@@ -424,10 +424,14 @@ See `docs/PHASE1_SETUP.md` for full instructions.
   - Flash Attention `2.8.3` and official Cut Cross Entropy plugin pre-compiled and active.
   - Maintained zero changes to local lightweight `.venv`.
   - Verified `axolotl --help` (exit 0) and `import axolotl.cli.train` (OK) inside Modal container.
-- **4. Resumable Model Weight Snapshot Download:**
+- **4. Resumable Model Weight Snapshot Download (Completed & Verified Live):**
   - Replaced metadata-only check with complete resumable snapshot download to `/checkpoints/muse-glimmer-30b/` using `snapshot_download`.
   - Pinned exact Meta revision: `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
-  - Validates full 55.49 GB footprint (Shard 1: 49.77 GB, Shard 2: 5.72 GB, plus all processor, tokenizer, and config files) and writes `/checkpoints/manifests/model_download_verified.json`.
+  - Successfully downloaded and verified live on Modal (`https://modal.com/apps/golixco40/main/ap-bqqPoqrrj8EThC1y1TCoKy`):
+    - Full 55.49 GB footprint committed to volume `lolixcopilot-checkpoints`.
+    - Shards verified: `model-00001-of-00002.safetensors` (49.77 GB) and `model-00002-of-00002.safetensors` (5.72 GB).
+    - All 6 processor, tokenizer, and config files verified.
+    - Manifest recorded to `/checkpoints/manifests/model_download_verified.json` with status `verified`.
 - **5. Training Dataset Launcher Fix & Fail-Closed Guardrails:**
   - Fixed `training/train_glimmer_qlora.py` CLI so `--dataset` argument is loaded and validated instead of defaulting to synthetic fixtures.
   - Implemented fail-closed guardrails:
