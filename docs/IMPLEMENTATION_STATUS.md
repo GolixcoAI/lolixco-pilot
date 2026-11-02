@@ -483,6 +483,26 @@ See `docs/PHASE1_SETUP.md` for full instructions.
   - Types: Mypy (38 backend source files) and `tsc --noEmit` passed with **0 errors**.
   - `npm run check:all`: Passed with exit code 0.
 
+### Phase 2.3: Final Review Hardening & Training Pipeline Consolidation
+- **1. Failed-Training Fail-Closed Guardrails:**
+  - `run_gpu_execution()` raises an immediate `RuntimeError` if Axolotl training exit code is non-zero, completely halting execution and preventing adapter reload or inference.
+  - Verification check enforces that `checkpoint_saved` and `checkpoint_verified` are confirmed before proceeding.
+  - Stale checkpoint directories are strictly rejected if a training run fails or artifacts are unverified.
+- **2. Strict Cached Checkpoint Verification & Dynamic Metadata:**
+  - Removed hardcoded duration values; cached runs dynamically load actual recorded `duration_seconds` from persistent `training_manifest.json`.
+  - Reusing a checkpoint requires verifying:
+    1. `training_manifest.json` exists with `status="success"` and `exit_code=0`.
+    2. `model_revision` matches `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
+    3. `dataset_hash` matches current dataset SHA-256.
+    4. `config_hash` matches current configuration YAML SHA-256.
+    5. `global_step >= 2` in both `trainer_state.json` and manifest.
+    6. `adapter_model.safetensors` and `adapter_config.json` exist and are non-empty.
+  - Reused checkpoints are reported explicitly as `REUSED_VERIFIED` separately from newly executed runs (`NEWLY_EXECUTED`).
+- **3. Legacy Remote Function Deprecation & Canonical Route Consolidation:**
+  - Removed duplicate `train_glimmer_qlora_remote` Modal H100 function and automatic 10-retry loop from `training/train_glimmer_qlora.py`.
+  - Preserved all offline dataset validation, temporal consistency, and fail-closed security checks in `training/train_glimmer_qlora.py`.
+  - Consolidated remote execution path: `modal run training/modal_gpu_execution.py::gpu_app` is the single canonical remote GPU entrypoint.
+
 ## Current Production Dataset & Evaluation Status
 
 - **Genuine Production Dataset Samples:** `0` (Docmatix 16-sample set is strictly an infrastructure smoke test; 7 synthetic samples are unit test fixtures).

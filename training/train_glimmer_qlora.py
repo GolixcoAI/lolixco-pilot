@@ -1,11 +1,10 @@
-"""Modal QLoRA Training Pipeline for Muse Glimmer 30B.
+"""Offline QLoRA Training Pipeline Validator & Local Dataset Guardrails for Muse Glimmer 30B.
 
 Provides:
-- Modal App definition with single H100 (80GB) GPU configuration.
-- Modal Volume attachment for durable checkpoint persistence across container retries.
-- Resumable training loop utilizing modal.Retries(initial_delay=0.0, max_retries=10).
 - Pure-Python training configuration and dataset validator for offline verification.
+- Fail-closed dataset guardrails (enforces genuine samples, prevents private/restricted media leakage).
 - Local CLI entrypoint supporting --help and --dry-run with explicit PASS/FAIL reporting.
+- Guidance redirecting remote GPU execution to canonical 'training/modal_gpu_execution.py::gpu_app'.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -743,8 +741,10 @@ def print_dry_run_summary(
         )
 
         if remote_ready:
-            print("\nTo launch live training on Modal H100 (when ready), run:")
-            print("  modal run training/train_glimmer_qlora.py --run-training")
+            print(
+                "\nTo launch live training on Modal H100 (when ready), run canonical harness:"
+            )
+            print("  modal run training/modal_gpu_execution.py::gpu_app")
         else:
             print("\n[BLOCKED] Remote training cannot be launched yet:")
             print("  Missing Cloud Resource: Volume 'lolixcopilot-checkpoints'")
@@ -755,70 +755,6 @@ def print_dry_run_summary(
         print(
             "\n[ERROR] Pipeline validation FAILED. Review failed checks above before training."
         )
-
-
-# ---------------------------------------------------------------------------
-# Modal Remote Function (GPU Workload — Triggered Only When Explicitly Run)
-# ---------------------------------------------------------------------------
-
-
-@app.function(
-    image=training_image,
-    gpu="H100",
-    timeout=7200,  # 2 hours max duration
-    volumes={"/checkpoints": checkpoint_volume},
-    secrets=[modal.Secret.from_name("huggingface-secret")],
-    retries=modal.Retries(initial_delay=0.0, max_retries=10),
-    single_use_containers=True,
-)
-def train_glimmer_qlora_remote(
-    config_yaml_content: str,
-    dataset_jsonl_content: str,
-) -> dict[str, Any]:
-    """Execute Axolotl / TRL QLoRA training on a single H100 80GB GPU.
-
-    Durable checkpoints are written to /checkpoints and committed to Modal Volume.
-    """
-    import subprocess
-
-    config_path = "/tmp/qlora_config.yml"
-    with open(config_path, "w", encoding="utf-8") as f:
-        f.write(config_yaml_content)
-
-    os.makedirs("/data", exist_ok=True)
-    dataset_path = "/data/anime_event_dataset.jsonl"
-    with open(dataset_path, "w", encoding="utf-8") as f:
-        f.write(dataset_jsonl_content)
-
-    # Resume from checkpoint if present in Volume
-    resume_flag: list[str] = []
-    checkpoint_dir = Path("/checkpoints/muse_glimmer_qlora")
-    if checkpoint_dir.exists():
-        existing_checkpoints = sorted(checkpoint_dir.glob("checkpoint-*"))
-        if existing_checkpoints:
-            latest_ckpt = str(existing_checkpoints[-1])
-            logger.info("Resuming training from latest checkpoint: %s", latest_ckpt)
-            resume_flag = ["--resume_from_checkpoint", latest_ckpt]
-
-    cmd = [
-        "/workspace/axolotl-venv/bin/accelerate",
-        "launch",
-        "-m",
-        "axolotl.cli.train",
-        config_path,
-        *resume_flag,
-    ]
-    logger.info("Executing training: %s", " ".join(cmd))
-    proc = subprocess.run(cmd, check=True)
-
-    # Commit Volume changes to durable storage
-    checkpoint_volume.commit()
-
-    return {
-        "status": "completed" if proc.returncode == 0 else "failed",
-        "returncode": proc.returncode,
-        "checkpoint_volume": "lolixcopilot-checkpoints",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -933,21 +869,18 @@ def cli_main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-        print("\n" + "!" * 80)
-        print("WARNING: Real training requested. Preparing Modal job...")
+        print("\n" + "=" * 80)
+        print("[DATASET VALIDATION PASSED]")
+        print(f"Verified {len(genuine_samples)} genuine samples in '{args.dataset}'.")
+        print(f"Validated configuration: {args.config}")
+        print("\n[CANONICAL MODAL TRAINING PATH]")
         print(
-            f"Dataset: {args.dataset} ({len(genuine_samples)} genuine samples verified)"
+            "Remote GPU execution is consolidated into the canonical Modal training harness:"
         )
-        print("Cost: ~$3.95/hr on 1x NVIDIA H100 (80GB). Estimated total: ~$7.90 USD.")
-        print("!" * 80)
-        with open(args.config, encoding="utf-8") as f:
-            cfg_text = f.read()
-
-        data_text = "\n".join(
-            [str(sample.model_dump_json()) for sample in genuine_samples]
-        )
-        res = train_glimmer_qlora_remote.remote(cfg_text, data_text)
-        print("Training Result:", res)
+        print("  modal run training/modal_gpu_execution.py::gpu_app")
+        print("\nFor offline dry-run and local validation, continue using:")
+        print("  python -m training.train_glimmer_qlora --dry-run --dataset <path>")
+        print("=" * 80)
 
     return 0
 

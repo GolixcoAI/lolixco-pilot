@@ -28,6 +28,7 @@ import logging
 import os
 import subprocess
 import time
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -125,7 +126,7 @@ def setup_checkpoint_volume_layout() -> dict[str, Any]:
 )
 def download_and_verify_model_weights() -> dict[str, Any]:
     """Execute resumable snapshot download of Muse-Glimmer-30B directly to persistent volume."""
-    from huggingface_hub import HfApi, snapshot_download
+    from huggingface_hub import HfApi, snapshot_download  # type: ignore[import-not-found]
 
     target_dir = Path("/checkpoints/muse-glimmer-30b")
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -373,7 +374,7 @@ def prepare_docmatix_smoke_dataset() -> dict[str, Any]:
 def run_multimodal_processor_preflight() -> str:
     """Run processor preflight on real Docmatix document images."""
     from PIL import Image
-    from transformers import AutoProcessor, AutoTokenizer
+    from transformers import AutoProcessor, AutoTokenizer  # type: ignore[import-not-found]
 
     token = os.environ.get("HF_TOKEN")
     logger.info(
@@ -472,7 +473,7 @@ def run_multimodal_processor_preflight() -> str:
 )
 def inspect_gpu_hardware() -> str:
     """Verify physical NVIDIA H100 hardware characteristics."""
-    import torch
+    import torch  # type: ignore[import-not-found]
 
     device_count = torch.cuda.device_count()
     if device_count == 0:
@@ -512,57 +513,116 @@ def run_axolotl_smoke_training(
     smoke_config_yaml: str, force_retrain: bool = False
 ) -> str:
     """Execute bounded 2-step Axolotl QLoRA training on official Docmatix dataset."""
+    import hashlib
     import json
     import re
     import time
+    from datetime import datetime
     from pathlib import Path
 
-    import torch
+    import torch  # type: ignore[import-not-found]
 
-    checkpoint_dir = Path("/checkpoints/training-runs/smoke_qlora_step2/checkpoint-2")
+    run_dir = Path("/checkpoints/training-runs/smoke_qlora_step2")
+    checkpoint_dir = run_dir / "checkpoint-2"
+    manifest_path = run_dir / "training_manifest.json"
     trainer_state_file = checkpoint_dir / "trainer_state.json"
     if not trainer_state_file.exists():
-        trainer_state_file = Path(
-            "/checkpoints/training-runs/smoke_qlora_step2/trainer_state.json"
-        )
+        trainer_state_file = run_dir / "trainer_state.json"
 
-    # If already trained and verified, reuse to respect execution policy avoiding duplicate GPU runs
-    if not force_retrain and checkpoint_dir.exists() and trainer_state_file.exists():
+    dataset_path = Path("/checkpoints/smoke_dataset/docmatix_smoke_16.jsonl")
+    dataset_hash = (
+        hashlib.sha256(dataset_path.read_bytes()).hexdigest()
+        if dataset_path.exists()
+        else ""
+    )
+    cfg_hash = hashlib.sha256(smoke_config_yaml.encode("utf-8")).hexdigest()
+
+    adapter_cfg = run_dir / "adapter_config.json"
+    adapter_weights = run_dir / "adapter_model.safetensors"
+
+    # 1. Verify cached checkpoint if present, manifest matches, and force_retrain is False
+    if (
+        not force_retrain
+        and manifest_path.exists()
+        and checkpoint_dir.exists()
+        and trainer_state_file.exists()
+    ):
         try:
-            state_data = json.loads(trainer_state_file.read_text(encoding="utf-8"))
-            if state_data.get("global_step", 0) >= 2:
-                losses = []
-                peak_vram_gb = 0.0
-                for entry in state_data.get("log_history", []):
-                    if "loss" in entry:
-                        losses.append(round(float(entry["loss"]), 4))
-                    if "memory/max_allocated (GiB)" in entry:
-                        peak_vram_gb = max(
-                            peak_vram_gb,
-                            round(float(entry["memory/max_allocated (GiB)"]), 2),
-                        )
+            m_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            st_data = json.loads(trainer_state_file.read_text(encoding="utf-8"))
+
+            has_artifacts = (
+                adapter_cfg.exists()
+                and adapter_cfg.stat().st_size > 0
+                and adapter_weights.exists()
+                and adapter_weights.stat().st_size > 0
+            )
+            expected_steps = 2
+            step_verified = (
+                st_data.get("global_step", 0) >= expected_steps
+                and m_data.get("global_step", 0) >= expected_steps
+            )
+            status_verified = (
+                m_data.get("status") == "success" and m_data.get("exit_code") == 0
+            )
+            revision_verified = m_data.get("model_revision") == TARGET_REVISION
+            dataset_verified = (
+                bool(dataset_hash) and m_data.get("dataset_hash") == dataset_hash
+            )
+            config_verified = bool(cfg_hash) and m_data.get("config_hash") == cfg_hash
+
+            if (
+                has_artifacts
+                and step_verified
+                and status_verified
+                and revision_verified
+                and dataset_verified
+                and config_verified
+            ):
+                recorded_duration = float(m_data.get("duration_seconds", 0.0))
                 logger.info(
-                    "Reusing verified 2-step checkpoint at %s (losses: %s)",
+                    "Reusing verified 2-step checkpoint at %s (recorded duration: %.2fs, losses: %s)",
                     checkpoint_dir,
-                    losses,
+                    recorded_duration,
+                    m_data.get("losses", []),
                 )
                 return json.dumps(
                     {
                         "exit_code": 0,
-                        "duration_seconds": 182.68,
+                        "duration_seconds": recorded_duration,
                         "checkpoint_saved": True,
+                        "checkpoint_verified": True,
                         "checkpoint_dir": str(checkpoint_dir),
-                        "losses": losses,
-                        "loss_step_1": losses[0] if len(losses) > 0 else None,
-                        "loss_step_2": losses[1] if len(losses) > 1 else None,
-                        "peak_vram_gb": peak_vram_gb,
+                        "losses": m_data.get("losses", []),
+                        "loss_step_1": (
+                            m_data.get("losses", [None])[0]
+                            if m_data.get("losses")
+                            else None
+                        ),
+                        "loss_step_2": (
+                            m_data.get("losses", [None, None])[1]
+                            if len(m_data.get("losses", [])) > 1
+                            else None
+                        ),
+                        "peak_vram_gb": m_data.get("peak_vram_gb", 0.0),
                         "reused_existing": True,
+                        "manifest_verified": True,
+                        "manifest_path": str(manifest_path),
                         "stdout_tail": "Reused verified 2-step Axolotl training checkpoint on persistent volume.",
                         "stderr_tail": "",
                     }
                 )
+            logger.warning(
+                "Cached checkpoint not reusable: has_artifacts=%s, step_verified=%s, status_verified=%s, revision_verified=%s, dataset_verified=%s, config_verified=%s",
+                has_artifacts,
+                step_verified,
+                status_verified,
+                revision_verified,
+                dataset_verified,
+                config_verified,
+            )
         except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning("Could not parse existing trainer_state.json: %s", exc)
+            logger.warning("Manifest/checkpoint verification failed: %s", exc)
 
     smoke_config_path = Path("/checkpoints/configs/muse_glimmer_smoke.yml")
     smoke_config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -580,18 +640,37 @@ def run_axolotl_smoke_training(
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     duration_s = time.time() - start_time
 
-    checkpoint_saved = checkpoint_dir.exists()
-
     stdout = proc.stdout or ""
     stderr = proc.stderr or ""
     full_output = stdout + "\n" + stderr
 
+    if proc.returncode != 0:
+        logger.error("Axolotl training failed with exit code %d", proc.returncode)
+        return json.dumps(
+            {
+                "exit_code": proc.returncode,
+                "duration_seconds": round(duration_s, 2),
+                "checkpoint_saved": False,
+                "checkpoint_verified": False,
+                "checkpoint_dir": str(checkpoint_dir),
+                "losses": [],
+                "loss_step_1": None,
+                "loss_step_2": None,
+                "peak_vram_gb": 0.0,
+                "reused_existing": False,
+                "manifest_verified": False,
+                "stdout_tail": stdout[-2000:] if stdout else "",
+                "stderr_tail": stderr[-2000:] if stderr else "",
+            }
+        )
+
     losses = []
     peak_vram_gb = 0.0
+    st_data = {}
     if trainer_state_file.exists():
         try:
-            state_data = json.loads(trainer_state_file.read_text(encoding="utf-8"))
-            for entry in state_data.get("log_history", []):
+            st_data = json.loads(trainer_state_file.read_text(encoding="utf-8"))
+            for entry in st_data.get("log_history", []):
                 if "loss" in entry:
                     losses.append(round(float(entry["loss"]), 4))
                 if "memory/max_allocated (GiB)" in entry:
@@ -609,18 +688,73 @@ def run_axolotl_smoke_training(
     if peak_vram_gb == 0.0 and torch.cuda.is_available():
         peak_vram_gb = round(torch.cuda.max_memory_allocated(0) / (1024**3), 2)
 
+    has_artifacts = (
+        checkpoint_dir.exists()
+        and adapter_cfg.exists()
+        and adapter_cfg.stat().st_size > 0
+        and adapter_weights.exists()
+        and adapter_weights.stat().st_size > 0
+        and st_data.get("global_step", 0) >= 2
+    )
+
+    if not has_artifacts:
+        logger.error(
+            "Axolotl training exited with code 0 but required adapter artifacts were missing or invalid."
+        )
+        return json.dumps(
+            {
+                "exit_code": 1,
+                "duration_seconds": round(duration_s, 2),
+                "checkpoint_saved": False,
+                "checkpoint_verified": False,
+                "checkpoint_dir": str(checkpoint_dir),
+                "losses": losses,
+                "loss_step_1": losses[0] if len(losses) > 0 else None,
+                "loss_step_2": losses[1] if len(losses) > 1 else None,
+                "peak_vram_gb": peak_vram_gb,
+                "reused_existing": False,
+                "manifest_verified": False,
+                "stdout_tail": stdout[-2000:] if stdout else "",
+                "stderr_tail": "Training exited 0 but required adapter artifacts were missing or invalid.",
+            }
+        )
+
+    # Save training manifest to disk
+    new_manifest = {
+        "status": "success",
+        "exit_code": 0,
+        "model_id": TARGET_MODEL_ID,
+        "model_revision": TARGET_REVISION,
+        "dataset_path": str(dataset_path),
+        "dataset_hash": dataset_hash,
+        "config_path": str(smoke_config_path),
+        "config_hash": cfg_hash,
+        "global_step": st_data.get("global_step", 2),
+        "total_flos": st_data.get("total_flos", 0),
+        "losses": losses,
+        "peak_vram_gb": peak_vram_gb,
+        "duration_seconds": round(duration_s, 2),
+        "adapter_model_bytes": adapter_weights.stat().st_size,
+        "adapter_config_bytes": adapter_cfg.stat().st_size,
+        "verified_at": datetime.now(UTC).isoformat(),
+    }
+    manifest_path.write_text(json.dumps(new_manifest, indent=2), encoding="utf-8")
     checkpoint_volume.commit()
+
     return json.dumps(
         {
-            "exit_code": proc.returncode,
+            "exit_code": 0,
             "duration_seconds": round(duration_s, 2),
-            "checkpoint_saved": checkpoint_saved,
+            "checkpoint_saved": True,
+            "checkpoint_verified": True,
             "checkpoint_dir": str(checkpoint_dir),
             "losses": losses,
             "loss_step_1": losses[0] if len(losses) > 0 else None,
             "loss_step_2": losses[1] if len(losses) > 1 else None,
             "peak_vram_gb": peak_vram_gb,
             "reused_existing": False,
+            "manifest_verified": True,
+            "manifest_path": str(manifest_path),
             "stdout_tail": stdout[-2000:] if stdout else "",
             "stderr_tail": stderr[-2000:] if stderr else "",
         }
@@ -640,10 +774,10 @@ def run_axolotl_smoke_training(
 )
 def reload_adapter_and_infer() -> str:
     """Reload step 2 QLoRA adapter and execute multimodal verification inference."""
-    import torch
-    from peft import PeftModel
+    import torch  # type: ignore[import-not-found]
+    from peft import PeftModel  # type: ignore[import-not-found]
     from PIL import Image
-    from transformers import (
+    from transformers import (  # type: ignore[import-not-found]
         AutoModelForImageTextToText,
         AutoProcessor,
         AutoTokenizer,
@@ -657,6 +791,18 @@ def reload_adapter_and_infer() -> str:
         raise FileNotFoundError(
             f"Checkpoint directory {adapter_path} not found. "
             "Ensure training completed successfully and saved checkpoint-2 before attempting adapter reload."
+        )
+
+    weights_file = adapter_path / "adapter_model.safetensors"
+    cfg_file = adapter_path / "adapter_config.json"
+    if (
+        not weights_file.exists()
+        or weights_file.stat().st_size == 0
+        or not cfg_file.exists()
+        or cfg_file.stat().st_size == 0
+    ):
+        raise FileNotFoundError(
+            f"Required adapter artifacts (adapter_model.safetensors, adapter_config.json) missing or empty in {adapter_path}."
         )
 
     local_weights = Path("/checkpoints/muse-glimmer-30b")
@@ -816,7 +962,14 @@ def run_gpu_execution() -> None:
         train_raw = run_axolotl_smoke_training.remote(smoke_cfg_yaml)
         train_res = json.loads(train_raw)
         print(f"  Exit Code: {train_res.get('exit_code')}")
-        print(f"  Duration: {train_res.get('duration_seconds')}s")
+        if train_res.get("reused_existing"):
+            print(
+                f"  Checkpoint Status: REUSED_VERIFIED (recorded duration: {train_res.get('duration_seconds')}s)"
+            )
+        else:
+            print(
+                f"  Checkpoint Status: NEWLY_EXECUTED (run duration: {train_res.get('duration_seconds')}s)"
+            )
         print(f"  Losses: {train_res.get('losses')}")
         if train_res.get("loss_step_1") is not None:
             print(f"  Step 1 Loss: {train_res.get('loss_step_1')}")
@@ -824,12 +977,25 @@ def run_gpu_execution() -> None:
             print(f"  Step 2 Loss: {train_res.get('loss_step_2')}")
         print(f"  Peak VRAM: {train_res.get('peak_vram_gb')} GB")
         print(f"  Checkpoint Saved: {train_res.get('checkpoint_saved')}")
+        print(f"  Checkpoint Verified: {train_res.get('checkpoint_verified')}")
         print(f"  Checkpoint Dir: {train_res.get('checkpoint_dir')}")
 
         if train_res.get("exit_code") != 0:
             print("\n[TRAINING OUTPUT TAIL]")
             print(train_res.get("stdout_tail", ""))
             print(train_res.get("stderr_tail", ""))
+            raise RuntimeError(
+                f"Axolotl training failed with exit code {train_res.get('exit_code')}. "
+                "Execution aborted; cannot proceed to adapter reload or inference."
+            )
+
+        if not train_res.get("checkpoint_saved") or not train_res.get(
+            "checkpoint_verified"
+        ):
+            raise RuntimeError(
+                "Training reported exit code 0 but required adapter checkpoint artifacts "
+                f"were not verified on the volume: {train_res}"
+            )
 
         print("\n[GPU Step 3] Reloading adapter and running verification inference...")
         infer_raw = reload_adapter_and_infer.remote()
