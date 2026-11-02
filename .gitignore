@@ -26,6 +26,8 @@ __pycache__/
 uploads/
 tmp/
 temp/
+checkpoints/
+training/data/
 *.mp4
 *.mov
 *.webm

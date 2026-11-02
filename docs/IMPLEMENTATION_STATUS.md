@@ -343,7 +343,168 @@ See `docs/PHASE1_SETUP.md` for full instructions.
 - Project Reference: `fhfkjviishfvfyawfckh` (Singapore `ap-southeast-1`).
 - Pending Migration: `supabase/migrations/20261101180000_media_intelligence_and_analyses_persistence.sql` ready to apply via Supabase CLI or Dashboard SQL editor when user is ready.
 
-### 5. Modal Workers & Training (Ready for Deployment when Authorized)
-- Deploy CPU Media Worker: `modal deploy workers/media_worker.py` (free until jobs invoked; ~$0.0012 per video).
-- Run Training Offline Dry-Run: `python training/train_glimmer_qlora.py --dry-run` (0 credits).
-- Launch Modal Training (Only when weights & dataset ready): `modal run training/train_glimmer_qlora.py` (resumable, H100 80GB).
+### Phase 2: Muse Glimmer Domain Fine-Tuning, Modal Infrastructure & Local Gojo Video Evaluation
+- **Git Feature Branch:**
+  - Branch: `feat/muse-glimmer-domain-finetune` branched from clean merged main (`e7512dc`).
+  - `.gitignore` updated: strict ignore rules for `training/data/` (including all raw footage, extracted frames, audio WAVs, contact sheets, and manifests) and `checkpoints/` ensuring zero private media or weight artifacts enter source control.
+- **Audit of Meta / Axolotl Official Training Recipe:**
+  - Audited `training/configs/muse_glimmer_30b_qlora.yml` against official Meta OSS Cookbook and Axolotl Muse Glimmer guide.
+  - Aligned LoRA targets to language projections only (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`).
+  - Frozen vision tower (ViT-G/14, `freeze_vision_tower: true`), frozen vision adapter, and frozen multimodal projector per official cookbook. Projector adaptation reserved as an optional documented ablation.
+  - Base model pinned to official Meta commit `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
+- **Persistent Modal Checkpoint Volume Provisioned:**
+  - Volume name: `lolixcopilot-checkpoints`.
+  - Structured storage layout provisioned and verified via Modal CPU runner:
+    - `/checkpoints/muse-glimmer-30b/`
+    - `/checkpoints/adapters/`
+    - `/checkpoints/training-runs/`
+    - `/checkpoints/manifests/`
+    - `/checkpoints/logs/`
+  - Provisioning manifest saved to `/checkpoints/manifests/volume_layout.json`.
+- **Model Weight Verification on Hugging Face:**
+  - Model: `meta-models/Muse-Glimmer-30B` at commit `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
+  - Verified 13 files totaling **55.49 GB** (59,581,829,216 bytes):
+    - `model-00001-of-00002.safetensors`: 49.77 GB
+    - `model-00002-of-00002.safetensors`: 5.72 GB
+    - 6 config/tokenizer files (`config.json`, `generation_config.json`, `processor_config.json`, `tokenizer.json`, `tokenizer_config.json`, `special_tokens_map.json`)
+  - Shard manifest recorded in `/checkpoints/manifests/model_shards_manifest.json`.
+- **Remote Multimodal Processor Preflight:**
+  - Executed on Modal in remote container (`training/modal_gpu_execution.py::cpu_app`).
+  - Successfully instantiated `MuseGlimmerProcessor` with `TokenizersBackend` (vocab size: 202,048).
+  - Multi-image tokenization verified with 2 sample images: prompt token sequence length 199, pixel values tensor shape `[512, 1176]`.
+  - Preflight results recorded in `/checkpoints/manifests/processor_preflight.json`.
+- **First Real-World Video Evaluation (`gojo_hollow_purple_edit.mp4`):**
+  - **Zero Cloud Exposure:** File strictly processed on local machine; zero frames, audio, or embeddings sent to Modal, Baseten, Meta, or any external service.
+  - **Asset Verification:**
+    - File path: `training/data/raw/gojo_hollow_purple_edit.mp4` (git-ignored)
+    - File size: 26,082,107 bytes (~24.87 MB)
+    - SHA-256: `a87f15978aa238d556dd5d159d94deb3a620d463c6b7282c81860d96e53abd63`
+    - Video: AV1 (`libdav1d`), 2560x1440, 30.0 fps, 3066 kb/s, duration 68.08s (2,042 frames)
+    - Audio: AAC stereo, 44,100 Hz, 128 kb/s
+  - **Audio Extraction:**
+    - Converted to local 16kHz mono 16-bit PCM WAV at `training/data/local_eval/gojo_hollow_purple/audio_16k_mono.wav`
+    - Volume analysis: Mean/RMS = -21.6 dBFS, Peak = -0.8 dBFS (no digital clipping)
+  - **Frame Extraction & Contact Sheet:**
+    - 12 chronological keyframes extracted across all narrative phases (0.5s to 66.0s)
+    - High-resolution composite contact sheet generated (`1340x660` RGB) with timecode and phase badges
+    - Copied to artifact directory for UI inspection: `contact_sheet.png`
+  - **Proposed Annotation Generated (`annotation_proposal.json`):**
+    - Source: Jujutsu Kaisen (Season 1 Episode 20 / Kyoto Goodwill Event Arc)
+    - Character: Satoru Gojo
+    - Event: Hollow Purple (Kyoshiki: Murasaki)
+    - Boundaries: Start `18.0s` -> Convergence `28.0s` -> Peak Discharge `35.0s` -> End Aftermath `48.0s`
+    - Status: `PENDING_USER_VERIFICATION` (not automatically marked as ground truth)
+- **Dataset Architecture & Candidate Integration:**
+  - Added `create_candidate_from_proposal(proposal)` in `training/dataset.py` mapping local inspection proposals directly to validated `AnimeEventSample` instances.
+  - Status marked as `pending_verification` with `rights_or_permission_status="user_private_evaluation_clip_restricted"`.
+- **Modal GPU Billing Gate Documented:**
+  - Modal platform policy requires a credit card / payment method on file (`https://modal.com/settings/billing`) before any GPU container (H100, A100, A10G, T4) can be spawned, regardless of credit balance.
+  - Decoupled `training/modal_gpu_execution.py` into `cpu_app` (runs freely on CPU) and `gpu_app` (ready to execute H100 hardware verification and 2-step QLoRA smoke training as soon as payment method is registered).
+- **Test Results & Verification:**
+  - Backend: **173 / 173 tests passed** (`.venv/bin/pytest backend/tests`).
+  - Frontend: **30 / 30 tests passed** (`npm --prefix frontend test -- --run`).
+  - Linting: Ruff (43 files) and ESLint passed with 0 errors.
+  - Types: Mypy (backend: 38 files, training/scripts: 11 files) and `tsc --noEmit` p### Phase 2.1: Resolving Blocking Review Findings on PR #2 (feat/muse-glimmer-domain-finetune)
+- **1. Official Docmatix 16-Sample Multimodal Smoke Dataset (`training/prepare_docmatix_smoke.py`):**
+  - Replaced arbitrary synthetic colored blocks with genuine 16-example preparation workflow from `HuggingFaceM4/Docmatix` (`train` split, revision `0725b65616e0e5f6024be10e38ddf8d8c48664fd`).
+  - Fetched 16 genuine high-resolution document images and grounded Q/A multi-turn conversations via Hugging Face datasets server.
+  - License metadata properly recorded as `MIT` (per official Docmatix dataset card).
+  - Formatted into OpenAI Messages schema compatible with Axolotl and Muse Glimmer with inline image paths: `{"type": "image", "path": ...}` and `"images": [...]`.
+  - Stored at `/checkpoints/smoke_dataset/docmatix_smoke_16.jsonl` with real PNG files in `/checkpoints/smoke_dataset/images/`.
+  - Recorded reproducibility manifest at `training/data/docmatix_smoke/docmatix_smoke_manifest.json` with SHA-256 integrity hashes for each image and record.
+- **2 & 6. Canonical Axolotl Training & Multimodal Loss Flow:**
+  - Standardized on the canonical, official Axolotl training pipeline (`axolotl.cli.train`).
+  - Created official recipe `training/configs/muse_glimmer_smoke.yml` configured with `processor_type: AutoProcessor` (removed deprecated `image_processor_type`).
+  - Configured for 2 optimizer steps with 4-bit NF4 QLoRA, LoRA $r=16/\alpha=32$, sequence length 2048, and Cut Cross Entropy plugin.
+  - Multi-image tensor pipeline: image tensors flow directly to the vision perception encoder via AutoProcessor, prompt tokens are masked to `-100` so loss is strictly evaluated on assistant response tokens, and gradients update language LoRA projections (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`).
+- **3. Dedicated Modal Training Container with Official Meta Pins:**
+  - Base Image: `axolotlai/axolotl:0.19.0-py3.12-cu130-2.12.1`.
+  - Verified remote environment: Python `3.12.13`, PyTorch `2.12.1+cu130`, Torchvision `0.27.1+cu130`, CUDA `13.0`, Transformers `5.16.1` (satisfies `>=5.15.0`), Axolotl `0.19.0`.
+  - Flash Attention `2.8.3` and official Cut Cross Entropy plugin pre-compiled and active.
+  - Zero changes to local lightweight `.venv`.
+- **4. Resumable Model Weight Snapshot Download (Verified Live):**
+  - Downloaded to `/checkpoints/muse-glimmer-30b/` using `snapshot_download` from `meta-models/Muse-Glimmer-30B`.
+  - Pinned exact Meta revision: `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
+  - Full 55.49 GB footprint committed to volume `lolixcopilot-checkpoints`:
+    - Shards verified: `model-00001-of-00002.safetensors` (49.77 GB) and `model-00002-of-00002.safetensors` (5.72 GB).
+    - All processor, tokenizer, and config files verified.
+    - Manifest recorded to `/checkpoints/manifests/model_download_verified.json` with status `verified`.
+- **5. Training Dataset Launcher Fix & Fail-Closed Guardrails:**
+  - Fixed `training/train_glimmer_qlora.py` CLI so `--dataset` argument is loaded and validated instead of defaulting to synthetic fixtures.
+  - Implemented fail-closed guardrails:
+    - Fails if `--run-training` invoked without `--dataset`.
+    - Fails if dataset contains 0 genuine samples (only synthetic test fixtures).
+    - Fails if dataset includes private/restricted media (`rights_or_permission_status in ("user_private_evaluation_clip_restricted", "prohibited")`).
+  - Added 4 unit tests in `backend/tests/test_training_pipeline.py`.
+- **6. Synthetic Fallback Removal:**
+  - Removed all synthetic colored-image fallback logic from `training/modal_gpu_execution.py`.
+  - `run_multimodal_processor_preflight` and `reload_adapter_and_infer` fail with clear `FileNotFoundError` if real image assets are missing.
+- **7. Local Gojo Clip Evaluation Boundary:**
+  - Preserved raw video `gojo_hollow_purple_edit.mp4` and all extracted derivatives strictly on local storage (`training/data/`).
+  - Contact sheet generated and preserved as artifact: `contact_sheet.png`.
+  - Zero external uploads to Modal, S3, Meta, or Baseten.
+
+### Phase 2.2: Modal H100 GPU Training & Multimodal Inference (Live Execution Completed)
+- **Account & Billing Verification:**
+  - Modal Account: `golixco40`. Payment method verified active. Available credits: ~$142.
+  - Meta API: `$100` promotional credit verified via `MODEL_API_KEY` probe (`GET https://api.meta.ai/v1/models` -> HTTP 200).
+- **Hardware Verification (NVIDIA H100 80GB HBM3):**
+  - Device: `NVIDIA H100 80GB HBM3`
+  - VRAM: `79.17 GB` (85,005,172,736 bytes)
+  - Compute Capability: `9.0` (SM90a Hopper architecture)
+  - CUDA: `13.0`
+  - BF16: Supported
+- **Axolotl 2-Step QLoRA Training Run:**
+  - Tool: `accelerate launch -m axolotl.cli.train /checkpoints/configs/muse_glimmer_smoke.yml`
+  - Dataset: 16 genuine Docmatix document training examples (`/checkpoints/smoke_dataset/docmatix_smoke_16.jsonl`).
+  - Axolotl Exit Code: `0` (Success)
+  - Duration: `182.68s` (total run time ~3.0 min)
+  - Training Step 1 Loss: `3.086` (grad_norm: `43.10`, lr: `0.0002`, peak allocated VRAM: `39.76 GiB`, reserved: `42.12 GiB`)
+  - Training Step 2 Loss: `2.1422` (grad_norm: `18.18`, lr: `0.0001`, peak allocated VRAM: `39.68 GiB`, reserved: `42.16 GiB`)
+  - Total FLOS: `1.68e+16`
+  - Checkpoint Saved: `/checkpoints/training-runs/smoke_qlora_step2/checkpoint-2` and final adapter at `/checkpoints/training-runs/smoke_qlora_step2/`
+  - Adapter Artifact: `adapter_model.safetensors` (`448,828,032 bytes`, ~448.8 MB) + `adapter_config.json`.
+- **QLoRA Adapter Reload & Multimodal Inference Verification:**
+  - Base Model: Loaded in 4-bit NF4 (`BitsAndBytesConfig` skipping `model.vision_tower` and `model.multi_modal_projector` so the ViT encoder remains in native BF16, avoiding byte-tensor quantization errors in `nn.LayerNorm`).
+  - Class: `AutoModelForImageTextToText` (`MuseGlimmerForConditionalGeneration`).
+  - Adapter Reload: Loaded via `PeftModel.from_pretrained(base_model, adapter_dir)`.
+  - Image Asset: Genuine Docmatix document `sample_000_img_0.png`.
+  - Prompt: *"What is the primary topic of this document?"*
+  - Generated Output:
+    > *"The document is Companies House Confirmation Statement CS01 (ef) for HERBERT ULRICH FRICK LTD. Company Number 07101641. Received for filing in Electronic Format on 23/03/2021. Confirmation Statement date 11/12/"*
+  - Inference Status: `success`
+- **End-to-End Pipeline Run:**
+  - Modal App: `https://modal.com/apps/golixco40/main/ap-jE4KPMwMTr32sDvPjozO2E`
+  - Command: `modal run training/modal_gpu_execution.py::gpu_app` executed and exited with code `0`.
+- **Test Results & Verification:**
+  - Backend: **177 / 177 tests passed** (`pytest` in 11.02s).
+  - Frontend: **30 / 30 tests passed** (`vitest` in 0.56s).
+  - Linting: Ruff (backend, training, scripts) and ESLint (frontend) passed with **0 errors**.
+  - Types: Mypy (38 backend source files) and `tsc --noEmit` passed with **0 errors**.
+  - `npm run check:all`: Passed with exit code 0.
+
+### Phase 2.3: Final Review Hardening & Training Pipeline Consolidation
+- **1. Failed-Training Fail-Closed Guardrails:**
+  - `run_gpu_execution()` raises an immediate `RuntimeError` if Axolotl training exit code is non-zero, completely halting execution and preventing adapter reload or inference.
+  - Verification check enforces that `checkpoint_saved` and `checkpoint_verified` are confirmed before proceeding.
+  - Stale checkpoint directories are strictly rejected if a training run fails or artifacts are unverified.
+- **2. Strict Cached Checkpoint Verification & Dynamic Metadata:**
+  - Removed hardcoded duration values; cached runs dynamically load actual recorded `duration_seconds` from persistent `training_manifest.json`.
+  - Reusing a checkpoint requires verifying:
+    1. `training_manifest.json` exists with `status="success"` and `exit_code=0`.
+    2. `model_revision` matches `a4e59da52a7bc87ae7251dd5545c0dd437c44b68`.
+    3. `dataset_hash` matches current dataset SHA-256.
+    4. `config_hash` matches current configuration YAML SHA-256.
+    5. `global_step >= 2` in both `trainer_state.json` and manifest.
+    6. `adapter_model.safetensors` and `adapter_config.json` exist and are non-empty.
+  - Reused checkpoints are reported explicitly as `REUSED_VERIFIED` separately from newly executed runs (`NEWLY_EXECUTED`).
+- **3. Legacy Remote Function Deprecation & Canonical Route Consolidation:**
+  - Removed duplicate `train_glimmer_qlora_remote` Modal H100 function and automatic 10-retry loop from `training/train_glimmer_qlora.py`.
+  - Preserved all offline dataset validation, temporal consistency, and fail-closed security checks in `training/train_glimmer_qlora.py`.
+  - Consolidated remote execution path: `modal run training/modal_gpu_execution.py::gpu_app` is the single canonical remote GPU entrypoint.
+
+## Current Production Dataset & Evaluation Status
+
+- **Genuine Production Dataset Samples:** `0` (Docmatix 16-sample set is strictly an infrastructure smoke test; 7 synthetic samples are unit test fixtures).
+- **Private Video Asset:** Gojo Hollow Purple clip remains strictly local (`training/data/raw/gojo_hollow_purple_edit.mp4`), pending visual verification by user.
+- **Next Step:** Curate genuine LolixCopilot temporal visual-event training examples (target: 500+ verified multi-frame clips with ground-truth temporal boundaries) using the verified H100 QLoRA training harness.

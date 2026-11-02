@@ -86,15 +86,17 @@ def verify_huggingface_environment() -> dict[str, Any]:
 
     # 3. Model Metadata Access Check
     target_model = "meta-models/Muse-Glimmer-30B"
+    target_revision = "a4e59da52a7bc87ae7251dd5545c0dd437c44b68"
     model_access_status = "UNKNOWN"
     metadata: dict[str, Any] = {}
 
     try:
-        info = api.model_info(repo_id=target_model)
+        info = api.model_info(repo_id=target_model, revision=target_revision)
         model_access_status = "AUTHORIZED"
         siblings = [s.rfilename for s in (info.siblings or [])]
         metadata = {
             "sha": getattr(info, "sha", None),
+            "target_revision": target_revision,
             "pipeline_tag": getattr(info, "pipeline_tag", None),
             "tags": [
                 t for t in (getattr(info, "tags", []) or []) if isinstance(t, str)
@@ -104,6 +106,7 @@ def verify_huggingface_environment() -> dict[str, Any]:
                 f for f in siblings if f.endswith((".json", ".yaml", ".yml"))
             ],
             "total_files": len(siblings),
+            "siblings": siblings,
         }
     except GatedRepoError as gre:
         safe_msg = str(gre).replace(token, "[REDACTED]") if token else str(gre)

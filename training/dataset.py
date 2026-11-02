@@ -1242,3 +1242,76 @@ def generate_dataset_manifests(
     manifest_metadata["checksums"]["metadata_sha256"] = get_file_sha(meta_file)
 
     return manifest_metadata
+
+
+def create_candidate_from_proposal(proposal: dict[str, Any]) -> AnimeEventSample:
+    """Construct an AnimeEventSample from a local evaluation proposal.
+
+    Enforces that candidate samples remain in 'pending_verification' status,
+    with rights set to 'user_private_evaluation_clip_restricted' to guarantee
+    they are not included in public/external training sets without explicit permission.
+    """
+    video_asset = proposal.get("video_asset", {})
+    id_info = proposal.get("proposed_identification", {})
+    bounds = proposal.get("proposed_temporal_boundaries", {})
+    frames_data = proposal.get("supporting_frames", [])
+    audio_chars = proposal.get("audio_characteristics", {})
+
+    rep_frames: list[RepresentativeFrame] = []
+    for f in frames_data:
+        ts = float(f["timestamp_seconds"])
+        mins = int(ts // 60)
+        secs = ts % 60
+        timecode = f"{mins:02d}:{secs:05.2f}"
+        rep_frames.append(
+            RepresentativeFrame(
+                timecode=timecode,
+                timestamp_seconds=ts,
+                frame_type=f.get("phase", "moment"),
+                description=f.get("description", "Frame"),
+                image_path=f.get("path", ""),
+                width=f.get("width"),
+                height=f.get("height"),
+                sha256_hash=f.get("sha256"),
+            )
+        )
+
+    audio_ref = AudioTaskReference(
+        has_audio=True,
+        soundtrack_title=None,
+        artist=None,
+        audio_match_status="unconfirmed",
+        audio_notes=audio_chars.get("soundtrack_note"),
+    )
+
+    clip_sha = video_asset.get("sha256", "clip")
+    return AnimeEventSample(
+        sample_id=f"eval-{clip_sha[:8]}",
+        source_title=id_info.get("source_title", "Jujutsu Kaisen"),
+        source_type="anime_edit",
+        source_video_id=video_asset.get("file_name", "gojo_hollow_purple_edit.mp4"),
+        episode_id="jjk_s01_ep20_user_edit",
+        split_group_id="jjk_s01_ep20_user_edit",
+        franchise=id_info.get("franchise", "Jujutsu Kaisen"),
+        season=1,
+        episode=20,
+        arc="Kyoto Goodwill Event Arc",
+        event_name=id_info.get("event_name", "Hollow Technique: Purple"),
+        character_names=[id_info.get("character", "Satoru Gojo")],
+        approx_start_seconds=float(bounds.get("event_start_seconds", 18.0)),
+        approx_end_seconds=float(bounds.get("event_end_aftermath_seconds", 48.0)),
+        peak_frame_timestamp=float(bounds.get("event_peak_discharge_seconds", 35.0)),
+        duration_seconds=float(video_asset.get("duration_seconds", 68.08)),
+        representative_frames=rep_frames,
+        visual_evidence=[
+            "Cursed Technique Reversal: Red orb",
+            "Cursed Technique Lapse: Blue singularity",
+            "Imaginary mass violet sphere",
+            "Ground vaporization trench",
+        ],
+        status="confirmed",
+        annotation_status="pending_verification",
+        annotation_source="local_inspection_proposal",
+        rights_or_permission_status="user_private_evaluation_clip_restricted",
+        audio_task_reference=audio_ref,
+    )

@@ -1,11 +1,10 @@
-"""Modal QLoRA Training Pipeline for Muse Glimmer 30B.
+"""Offline QLoRA Training Pipeline Validator & Local Dataset Guardrails for Muse Glimmer 30B.
 
 Provides:
-- Modal App definition with single H100 (80GB) GPU configuration.
-- Modal Volume attachment for durable checkpoint persistence across container retries.
-- Resumable training loop utilizing modal.Retries(initial_delay=0.0, max_retries=10).
 - Pure-Python training configuration and dataset validator for offline verification.
+- Fail-closed dataset guardrails (enforces genuine samples, prevents private/restricted media leakage).
 - Local CLI entrypoint supporting --help and --dry-run with explicit PASS/FAIL reporting.
+- Guidance redirecting remote GPU execution to canonical 'training/modal_gpu_execution.py::gpu_app'.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,19 +34,9 @@ logger = logging.getLogger("lolixcopilot.training")
 # Modal Image, App & Volume Definition
 # ---------------------------------------------------------------------------
 
-training_image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git", "curl")
-    .pip_install(
-        "torch>=2.4.0",
-        "transformers>=4.45.0",
-        "peft>=0.13.0",
-        "bitsandbytes>=0.43.0",
-        "accelerate>=0.34.0",
-        "pydantic>=2.10.0",
-        "pyyaml>=6.0.0",
-    )
-)
+training_image = modal.Image.from_registry(
+    "axolotlai/axolotl:0.19.0-py3.12-cu130-2.12.1"
+).env({"PATH": "/workspace/axolotl-venv/bin:/usr/local/bin:/usr/bin:/bin"})
 
 app = modal.App(
     name="lolixcopilot-muse-glimmer-training",
@@ -178,14 +166,19 @@ def run_pipeline_dry_run(
     # 4. Trainable / Frozen Parameters
     targets = config.get("lora_target_modules", [])
     freeze_vision = config.get("freeze_vision_tower", True)
-    has_proj = "multi_modal_projector" in targets
     has_attention = {"q_proj", "k_proj", "v_proj", "o_proj"}.issubset(set(targets))
     has_mlp = {"gate_proj", "up_proj", "down_proj"}.issubset(set(targets))
-    if freeze_vision and has_attention and has_mlp and has_proj:
+    has_proj = "multi_modal_projector" in targets
+    if freeze_vision and has_attention and has_mlp:
+        adapter_desc = (
+            "ViT-G/14 perception encoder, vision adapter, and projector frozen; trainable LoRA adapters on language attention (Q,K,V,O) and SwiGLU MLP (official Meta recipe)"
+            if not has_proj
+            else "ViT-G/14 perception encoder frozen; trainable LoRA adapters on attention (Q,K,V,O), SwiGLU MLP, and multimodal projector (experimental ablation)"
+        )
         add_check(
             "Trainable / Frozen Parameters",
             True,
-            "ViT-G/14 perception encoder frozen; trainable LoRA adapters on attention (Q,K,V,O), SwiGLU MLP, and multimodal projector",
+            adapter_desc,
         )
     else:
         add_check(
@@ -592,6 +585,26 @@ def run_pipeline_dry_run(
         "estimated_duration_hours": 2.0,
         "estimated_cost_usd": 7.90,
         "checks": checks,
+        "genuine_sample_count": sum(
+            1
+            for s in samples
+            if getattr(s, "annotation_status", "") != "fixture"
+            and getattr(s, "annotation_source", "") != "test_fixture_seed"
+        ),
+        "synthetic_fixture_count": sum(
+            1
+            for s in samples
+            if getattr(s, "annotation_status", "") == "fixture"
+            or getattr(s, "annotation_source", "") == "test_fixture_seed"
+        ),
+        "restricted_clip_count": sum(
+            1
+            for s in samples
+            if getattr(s, "rights_or_permission_status", "")
+            in ("user_private_evaluation_clip_restricted", "prohibited")
+        ),
+        "loaded_samples_count": len(samples),
+        "dataset_source": dataset_source,
     }
 
     add_check(
@@ -728,8 +741,10 @@ def print_dry_run_summary(
         )
 
         if remote_ready:
-            print("\nTo launch live training on Modal H100 (when ready), run:")
-            print("  modal run training/train_glimmer_qlora.py --run-training")
+            print(
+                "\nTo launch live training on Modal H100 (when ready), run canonical harness:"
+            )
+            print("  modal run training/modal_gpu_execution.py::gpu_app")
         else:
             print("\n[BLOCKED] Remote training cannot be launched yet:")
             print("  Missing Cloud Resource: Volume 'lolixcopilot-checkpoints'")
@@ -740,63 +755,6 @@ def print_dry_run_summary(
         print(
             "\n[ERROR] Pipeline validation FAILED. Review failed checks above before training."
         )
-
-
-# ---------------------------------------------------------------------------
-# Modal Remote Function (GPU Workload — Triggered Only When Explicitly Run)
-# ---------------------------------------------------------------------------
-
-
-@app.function(
-    image=training_image,
-    gpu="H100",
-    timeout=7200,  # 2 hours max duration
-    volumes={"/checkpoints": checkpoint_volume},
-    secrets=[modal.Secret.from_name("huggingface-secret")],
-    retries=modal.Retries(initial_delay=0.0, max_retries=10),
-    single_use_containers=True,
-)
-def train_glimmer_qlora_remote(
-    config_yaml_content: str,
-    dataset_jsonl_content: str,
-) -> dict[str, Any]:
-    """Execute Axolotl / TRL QLoRA training on a single H100 80GB GPU.
-
-    Durable checkpoints are written to /checkpoints and committed to Modal Volume.
-    """
-    import subprocess
-
-    config_path = "/tmp/qlora_config.yml"
-    with open(config_path, "w", encoding="utf-8") as f:
-        f.write(config_yaml_content)
-
-    os.makedirs("/data", exist_ok=True)
-    dataset_path = "/data/anime_event_dataset.jsonl"
-    with open(dataset_path, "w", encoding="utf-8") as f:
-        f.write(dataset_jsonl_content)
-
-    # Resume from checkpoint if present in Volume
-    resume_flag: list[str] = []
-    checkpoint_dir = Path("/checkpoints/muse_glimmer_qlora")
-    if checkpoint_dir.exists():
-        existing_checkpoints = sorted(checkpoint_dir.glob("checkpoint-*"))
-        if existing_checkpoints:
-            latest_ckpt = str(existing_checkpoints[-1])
-            logger.info("Resuming training from latest checkpoint: %s", latest_ckpt)
-            resume_flag = ["--resume_from_checkpoint", latest_ckpt]
-
-    cmd = ["accelerate", "launch", "-m", "axolotl.cli.train", config_path, *resume_flag]
-    logger.info("Executing training: %s", " ".join(cmd))
-    proc = subprocess.run(cmd, check=True)
-
-    # Commit Volume changes to durable storage
-    checkpoint_volume.commit()
-
-    return {
-        "status": "completed" if proc.returncode == 0 else "failed",
-        "returncode": proc.returncode,
-        "checkpoint_volume": "lolixcopilot-checkpoints",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -860,16 +818,69 @@ def cli_main(argv: list[str] | None = None) -> int:
                 print(f"  - {blocker}")
             return 1
 
-        print("\n" + "!" * 80)
-        print("WARNING: Real training requested. Preparing Modal job...")
-        print("Cost: ~$3.95/hr on 1x NVIDIA H100 (80GB). Estimated total: ~$7.90 USD.")
-        print("!" * 80)
-        with open(args.config, encoding="utf-8") as f:
-            cfg_text = f.read()
-        seed_data = create_seed_dataset()
-        data_text = "\n".join([str(sample.model_dump_json()) for sample in seed_data])
-        res = train_glimmer_qlora_remote.remote(cfg_text, data_text)
-        print("Training Result:", res)
+        # Enforce fail-closed dataset rules
+        if not args.dataset:
+            print(
+                "\n[BLOCKED] Production training requires an explicit dataset path via --dataset.\n"
+                "Running real training with default synthetic fixtures is prohibited to prevent model degradation."
+            )
+            return 1
+
+        dataset_path = Path(args.dataset)
+        if not dataset_path.is_file():
+            print(f"\n[BLOCKED] Supplied dataset file not found: {args.dataset}")
+            return 1
+
+        loaded_samples: list[AnimeEventSample] = []
+        with open(dataset_path, encoding="utf-8") as f:
+            for line in f:
+                line_str = line.strip()
+                if line_str:
+                    loaded_samples.append(AnimeEventSample(**json.loads(line_str)))
+
+        genuine_samples = [
+            s
+            for s in loaded_samples
+            if getattr(s, "annotation_status", "") != "fixture"
+            and getattr(s, "annotation_source", "") != "test_fixture_seed"
+            and getattr(s, "rights_or_permission_status", "")
+            not in ("user_private_evaluation_clip_restricted", "prohibited")
+        ]
+
+        if not genuine_samples:
+            print(
+                f"\n[BLOCKED] Production training failed closed: dataset '{args.dataset}' "
+                f"contains 0 verified genuine samples ({len(loaded_samples)} items total: fixtures or restricted). "
+                "Real domain fine-tuning requires verified, permitted video data."
+            )
+            return 1
+
+        restricted_items = [
+            s
+            for s in loaded_samples
+            if getattr(s, "rights_or_permission_status", "")
+            in ("user_private_evaluation_clip_restricted", "prohibited")
+        ]
+        if restricted_items:
+            print(
+                f"\n[BLOCKED] Production training failed closed: dataset contains {len(restricted_items)} "
+                "restricted items (user_private_evaluation_clip_restricted). "
+                "Uploading or training on restricted user footage is strictly prohibited."
+            )
+            return 1
+
+        print("\n" + "=" * 80)
+        print("[DATASET VALIDATION PASSED]")
+        print(f"Verified {len(genuine_samples)} genuine samples in '{args.dataset}'.")
+        print(f"Validated configuration: {args.config}")
+        print("\n[CANONICAL MODAL TRAINING PATH]")
+        print(
+            "Remote GPU execution is consolidated into the canonical Modal training harness:"
+        )
+        print("  modal run training/modal_gpu_execution.py::gpu_app")
+        print("\nFor offline dry-run and local validation, continue using:")
+        print("  python -m training.train_glimmer_qlora --dry-run --dataset <path>")
+        print("=" * 80)
 
     return 0
 
