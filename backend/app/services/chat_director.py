@@ -231,7 +231,7 @@ class ChatDirectorService:
                     {
                         "id": "scene-01",
                         "start_seconds": 18.0,
-                        "end_seconds": 24.0,
+                        "end_seconds": 25.0,
                         "moment": "Cursed energy weaving & incantation",
                         "why_it_works": "Builds ominous anticipation with calm sorcerer confidence",
                         "editing_direction": "Hold steady, subtle push-in",
@@ -240,8 +240,8 @@ class ChatDirectorService:
                     },
                     {
                         "id": "scene-02",
-                        "start_seconds": 26.0,
-                        "end_seconds": 31.0,
+                        "start_seconds": 25.0,
+                        "end_seconds": 32.0,
                         "moment": "Red and Blue sphere collision & fusion",
                         "why_it_works": "Visual convergence of two opposing cursed techniques",
                         "editing_direction": "Accelerate cut rate into fusion flash",
@@ -250,8 +250,8 @@ class ChatDirectorService:
                     },
                     {
                         "id": "scene-03",
-                        "start_seconds": 34.0,
-                        "end_seconds": 41.0,
+                        "start_seconds": 33.0,
+                        "end_seconds": 43.0,
                         "moment": "Hollow Purple peak release & terrain trench",
                         "why_it_works": "Maximum cinematic payoff and visual spectacle",
                         "editing_direction": "Dynamic speed ramp into full shockwave",
@@ -274,12 +274,11 @@ class ChatDirectorService:
             }
             content = (
                 "**Generated 30-Second Cinematic Cut Blueprint:**\n\n"
-                "• **Scene 1 (18.0s – 24.0s):** Opening Hook — Incantation [6.0s]\n"
-                "• **Scene 2 (26.0s – 31.0s):** Build — Red & Blue Convergence [5.0s]\n"
-                "• **Scene 3 (34.0s – 41.0s):** Climax — Hollow Purple Peak Discharge [7.0s]\n"
+                "• **Scene 1 (18.0s – 25.0s):** Opening Hook — Incantation [7.0s]\n"
+                "• **Scene 2 (25.0s – 32.0s):** Build — Red & Blue Convergence [7.0s]\n"
+                "• **Scene 3 (33.0s – 43.0s):** Climax — Hollow Purple Peak Discharge [10.0s]\n"
                 "• **Scene 4 (44.0s – 50.0s):** Resolution — Target Impact & Smoke [6.0s]\n\n"
-                "Total Duration: **24.0s active cut** (leaving 6s headroom for intro/outro cards). "
-                "Timeline has been updated!"
+                "Total Duration: **30.0s exact cut**. Timeline has been updated!"
             )
             cards = [
                 ChatEvidenceCard(

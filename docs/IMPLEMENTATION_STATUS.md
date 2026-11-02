@@ -545,15 +545,34 @@ See `docs/PHASE1_SETUP.md` for full instructions.
     - Timeout: `300 seconds`
     - Ephemeral Storage: `2048 MB` (/tmp)
   - Configured S3 Bucket Event Notification on `lolixcopilot-media-247673029886-ap-south-1` with prefix `users/` and granted S3 principal permission to invoke Lambda.
-- **3. Live AWS Lambda Function Verification:**
+- **3. Live AWS Lambda Function Verification & CloudWatch Audit:**
   - `probe` invocation: Verified against Gojo AV1 original footage (`users/demo-eval/projects/gojo-hollow-purple/media/gojo_hollow_purple_edit.mp4`) -> returned HTTP 200, duration 68.08s, 2560x1440, video codec `av1`, audio codec `aac`, fps 30.0.
   - `extract_audio_beats` invocation: Verified against Gojo footage -> returned HTTP 200, mean volume -21.0 dBFS, max volume -0.4 dBFS, estimated tempo 128 BPM, and rhythm onset timestamps `[12.8, 19.6, 28.0, 35.0, 39.0, 48.0]`.
-- **4. Backend Integration & Automated Test Coverage:**
-  - Implemented `AWSLambdaMediaProcessingService` in `backend/app/services/aws_lambda_service.py` adhering to `BaseMediaProcessingService`.
-  - Updated `get_media_processing_service` factory with `USE_AWS_LAMBDA_MEDIA_WORKER` toggle and added configuration parameters to `backend/app/config.py` and `.env.example`.
-  - Created automated deployment script `scripts/aws/deploy_lambda.sh`.
-  - Authored unit test suite in `backend/tests/test_aws_lambda_service.py` (6 tests covering probe, proxy, beats, cut rendering, fallback paths, and factory resolution).
-- **5. Full Verification Suite Results:**
+  - `create_proxy` invocation: Generated `proxies/demo-eval/gojo_lambda_h264_preview.mp4` (31.6 MB) via Lambda. Validated with FFprobe: 1920x1080 (1080p), `h264 (High) (avc1)`, `aac (LC) 44.1kHz stereo`, 68.08s duration.
+  - `render_cut` invocation: Executed multi-segment trimming and concatenation in Lambda (`RequestId: e4e4984b-0108-4806-9602-bafd2199ea5c`). CloudWatch recorded: Duration `102,102 ms`, Billed Duration `102,103 ms`, Memory Size `2048 MB`, Max Memory Used `712 MB`. Output uploaded to `exports/demo-eval/gojo_30s_cinematic_cut.mp4` (15.2 MB).
+- **4. Fixed Gojo 30-Second Export Duration Discrepancy:**
+  - Resolved previous duration discrepancy where scenes totaled 24.04s.
+  - Calibrated 4 narrative cut scenes in `backend/app/services/chat_director.py`:
+    - Scene 1 (Opening Hook — Incantation): 18.0s – 25.0s [7.0s]
+    - Scene 2 (Convergence — Red & Blue Fusion): 25.0s – 32.0s [7.0s]
+    - Scene 3 (Climax — Hollow Purple Peak Discharge): 33.0s – 43.0s [10.0s]
+    - Scene 4 (Resolution — Hanami Impact & Aftermath): 44.0s – 50.0s [6.0s]
+    - Total: **30.0s exact cut**.
+  - Verified rendered export via FFprobe: `Duration: 00:00:30.18`, Resolution: `1920x1080`, Codec: `h264`, Audio: `aac 44.1kHz stereo`.
+- **5. Backend Service Selection & Graceful Local Fallback (`scripts/verify_aws_lambda_selection.py`):**
+  - Verified dependency injection selects `AWSLambdaMediaProcessingService` when `USE_AWS_LAMBDA_MEDIA_WORKER=true`.
+  - Verified live Lambda probing of S3 footage.
+  - Tested graceful error handling: when Lambda is unreachable or returns an error, the service logs a warning and transparently falls back to `LocalMediaProcessingService` without breaking user requests.
+- **6. Live End-to-End Browser Workstation Verification:**
+  - Recorded interactive browser session in Chrome via browser subagent (`workstation_e2e_demo_1793633949769.webp`).
+  - Verified dark editing studio aesthetic (black/charcoal surfaces, crisp white typography, neon yellow accents).
+  - Tested AI Director conversational query (*"Make me a cinematic 30-second edit"*), verified 30s blueprint return with 4 stages and confidence ratings.
+  - Verified Timeline dock synchronization, timecode display, and ExportModal with 30s cut summary and resolution selection.
+- **7. Lifecycle Policy & AWS Cost Audit:**
+  - **7-Day Retention (`ExpireUserFootageAfter7Days`):** Enforced on `users/` prefix for cost control and privacy compliance. 1-day abort rule for incomplete multipart uploads prevents orphaned part billing.
+  - **Dual Notification Preservation:** Configured S3 bucket notification with both `LambdaFunctionConfigurations` and `EventBridgeConfiguration: {}` for seamless event consumption without overwriting existing integrations.
+  - **AWS Costs:** S3 storage (~133 MB = $0.003/mo), Lambda execution (~754 GB-s well within the 400,000 free tier GB-s/mo). Total actual cost incurred: **$0.00**; projected demonstration recurring cost: **< $2.00/month**.
+- **8. Full Verification Suite Results:**
   - Backend: **192 / 192 tests passed** (100% pass rate in 17.16s).
   - Backend Lint & Format: `ruff check` and `ruff format` passed with 0 errors.
   - Backend Type Check: `mypy backend/app backend/tests` passed with 0 issues in 48 source files.
