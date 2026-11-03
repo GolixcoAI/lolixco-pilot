@@ -9,11 +9,13 @@ export interface MediaClip {
   thumbnail?: string;
   isCustom?: boolean;
   isRealUpload?: boolean;
-  status?: "pending" | "uploaded" | "verified" | "failed" | "expired";
+  status?: "pending" | "uploading" | "uploaded" | "verified" | "failed" | "expired";
   s3Key?: string;
   expiresAt?: string;
   uploadProgress?: number;
   errorMessage?: string;
+  fps?: string;
+  codec?: string;
 }
 
 export type MomentTag = "HOOK" | "BUILD" | "CLIMAX" | "RESOLVE";
@@ -123,7 +125,64 @@ export interface UserFeedbackData {
   updated_at?: string | null;
 }
 
-export type AIProviderName = "baseten" | "meta" | "mock";
+export type AIProviderName = "auto" | "modal" | "meta" | "baseten" | "mock";
+
+export interface InferenceTraceItem {
+  provider: string;
+  model: string;
+  task: string;
+  status: string;
+  latency_ms: number;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  cost_usd?: number | null;
+}
+
+export interface SceneBreakdownItem {
+  id: string;
+  start_seconds: number;
+  end_seconds: number;
+  timecode_range: string;
+  title: string;
+  description: string;
+  thumbnail_url: string;
+  editing_direction?: string | null;
+}
+
+export interface EditRecommendationItem {
+  id: string;
+  text: string;
+  checked: boolean;
+  action_type: string;
+  timestamp_seconds?: number | null;
+}
+
+export type ChatEditRecommendation = EditRecommendationItem;
+export type ChatInferenceTrace = InferenceTraceItem;
+export type ChatSceneBreakdown = SceneBreakdownItem;
+
+export interface ProviderUsageStats {
+  calls: number;
+  tokens_prompt: number;
+  tokens_completion: number;
+  total_tokens: number;
+  compute_seconds: number;
+  estimated_cost_usd: number;
+  last_model_used: string | null;
+  last_call_at: string | null;
+}
+
+export interface AIUsageTelemetry {
+  total_ai_calls: number;
+  estimated_total_cost_usd: number;
+  modal: ProviderUsageStats;
+  meta: ProviderUsageStats;
+  baseten: ProviderUsageStats;
+  lambda_processor: ProviderUsageStats;
+  session_started_at: string;
+  last_updated_at: string;
+}
 
 export interface AnalysisResponseData {
   id: string;

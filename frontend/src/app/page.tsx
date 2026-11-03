@@ -43,14 +43,14 @@ import { formatTimecode } from "@/lib/timecode";
 
 export default function WorkstationPage() {
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState("Untitled Cut");
-  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("9:16");
-  const [activeTab, setActiveTab] = useState<NavTab>("editpilot");
+  const [projectName, setProjectName] = useState("Hollow Purple — Edit Session");
+  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("16:9");
+  const [activeTab, setActiveTab] = useState<NavTab>("media");
 
   // Media and playback state
   const [clips, setClips] = useState<MediaClip[]>(INITIAL_DEMO_CLIPS);
   const [activeClipId, setActiveClipId] = useState<string | null>("clip-1");
-  const [currentTime, setCurrentTime] = useState(18.4);
+  const [currentTime, setCurrentTime] = useState(12.46);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -678,6 +678,28 @@ export default function WorkstationPage() {
         onSeek={(sec) => setCurrentTime(sec)}
         beatTimestamps={beatTimestamps}
       />
+
+      {/* Bottom Status Bar */}
+      <footer className="flex h-6 w-full shrink-0 items-center justify-between border-t border-[#1f2433] bg-[#08090c] px-3 font-mono text-[10px] text-[#64748b] select-none z-20">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1 text-[#22c55e]">
+            <span>✓</span>
+            <span>Proxy ready (H.264, 1280x720)</span>
+          </span>
+          <span className="text-[#1f2433]">|</span>
+          <span>30.18s</span>
+          <span className="text-[#1f2433]">|</span>
+          <span>30.00 fps</span>
+          <span className="text-[#1f2433]">|</span>
+          <span>Project: 1920 × 1080</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1.5 text-[#9ca3af]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
+            <span>Render: Idle</span>
+          </span>
+        </div>
+      </footer>
 
       {/* Privacy and Policy Modal */}
       <PrivacyModal

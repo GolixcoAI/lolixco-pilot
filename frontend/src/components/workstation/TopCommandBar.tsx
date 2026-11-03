@@ -25,7 +25,7 @@ export function TopCommandBar({
 }: TopCommandBarProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [healthStatus, setHealthStatus] = useState<"healthy" | "connecting" | "offline">("connecting");
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const config = getFrontendConfig();
 
@@ -42,7 +42,7 @@ export function TopCommandBar({
       }
     };
     checkApi();
-    const interval = setInterval(checkApi, 20000);
+    const interval = setInterval(checkApi, 25000);
     return () => {
       active = false;
       clearInterval(interval);
@@ -54,22 +54,23 @@ export function TopCommandBar({
       onOpenExport();
       return;
     }
-    setExportNotice("Exporting blueprints will be enabled in Phase 3. Workstation is currently in preview mode.");
-    setTimeout(() => setExportNotice(null), 3500);
   };
 
   const handleShareClick = () => {
-    setExportNotice("Collaborative project sharing will be configured with Supabase Auth in Phase 1.");
-    setTimeout(() => setExportNotice(null), 3500);
+    setNotice("Project URL copied to clipboard");
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(window.location.href).catch(() => {});
+    }
+    setTimeout(() => setNotice(null), 3000);
   };
 
   return (
-    <header className="relative z-30 flex h-12 w-full shrink-0 items-center justify-between border-b border-[#1f2433] bg-[#0a0c10] px-4 select-none">
-      {/* Left side: Brand, Project name, and Save state */}
+    <header className="relative z-30 flex h-11 w-full shrink-0 items-center justify-between border-b border-[#1f2433] bg-[#08090c] px-3 select-none">
+      {/* Left section: Logo, Project Name, Saved State */}
       <div className="flex items-center gap-3">
-        <LolixcoLogo size={26} showWordmark={true} />
+        <LolixcoLogo height={26} showDropdown={true} />
 
-        <div className="h-4 w-px bg-[#202532]" aria-hidden="true" />
+        <div className="h-4 w-px bg-[#1f2433]" aria-hidden="true" />
 
         {isEditingName ? (
           <input
@@ -87,100 +88,94 @@ export function TopCommandBar({
           <button
             type="button"
             onClick={() => setIsEditingName(true)}
-            title="Click to rename project"
-            className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs font-semibold text-[#f3f4f6] transition-colors hover:bg-[#161a26]"
+            title="Click to rename session"
+            className="group flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs font-semibold text-[#f3f4f6] transition-colors hover:bg-[#161a26]"
           >
             <span>{projectName}</span>
             <svg
-              className="h-3.5 w-3.5 text-[#9ca3af]"
+              className="h-3 w-3 text-[#64748b] group-hover:text-[#ffe600]"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+              />
             </svg>
           </button>
         )}
 
-        <div className="hidden items-center gap-1 text-[11px] font-mono text-[#64748b] md:flex">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
-          <span>Saved</span>
+        <div className="flex items-center gap-1 text-[11px] font-mono text-[#9ca3af]">
+          <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#22c55e]/15 text-[#22c55e]">
+            ✓
+          </span>
+          <span className="text-[#64748b]">Saved just now</span>
         </div>
       </div>
 
-      {/* Center: Live API status & notification */}
+      {/* Center: Live status notification */}
       <div className="flex items-center gap-3">
-        {exportNotice && (
-          <div className="animate-fade-in rounded border border-[#ffe600]/40 bg-[#161a26] px-3 py-1 text-xs font-medium text-[#ffe600]">
-            {exportNotice}
+        {notice && (
+          <div className="animate-fade-in rounded border border-[#ffe600]/40 bg-[#161a26] px-3 py-0.5 text-[11px] font-medium text-[#ffe600]">
+            {notice}
           </div>
         )}
-
-        <div
-          className="flex items-center gap-1.5 rounded-full border border-[#1f2433] bg-[#11141e] px-2.5 py-0.5 text-[11px] font-mono text-[#9ca3af]"
-          title={
-            healthStatus === "healthy"
-              ? `Connected to LolixCopilot FastAPI backend at ${config.apiBaseUrl}`
-              : `FastAPI backend unavailable at ${config.apiBaseUrl}`
-          }
-        >
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${
-              healthStatus === "healthy"
-                ? "bg-[#22c55e]"
-                : healthStatus === "connecting"
-                ? "bg-[#eab308] animate-pulse"
-                : "bg-[#ef4444]"
-            }`}
-          />
-          <span className="hidden sm:inline">
-            {healthStatus === "healthy" ? "API Online" : healthStatus === "connecting" ? "Connecting" : "API Offline"}
-          </span>
-        </div>
       </div>
 
-      {/* Right side: Aspect ratio selector, Privacy notice, Share, Export */}
+      {/* Right section: Undo/Redo, Aspect ratio, Share, Export */}
       <div className="flex items-center gap-2">
-        {/* Aspect ratio selector */}
+        {/* Undo / Redo */}
+        <div className="flex items-center gap-0.5 pr-1 text-[#9ca3af]">
+          <button
+            type="button"
+            title="Undo (Ctrl+Z)"
+            className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#141722] hover:text-[#ffffff]"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2m0 0l-4-4m4 4l4-4" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Redo (Ctrl+Y)"
+            className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#141722] hover:text-[#ffffff]"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10H11a5 5 0 00-5 5v2m0 0l4-4m-4 4l-4-4" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Aspect ratio dropdown */}
         <div className="relative">
           <select
             value={aspectRatio}
             onChange={(e) => setAspectRatio(e.target.value as "9:16" | "16:9" | "1:1")}
-            aria-label="Select preview aspect ratio"
-            className="cursor-pointer appearance-none rounded-md border border-[#1f2433] bg-[#11141e] py-1.5 pl-3 pr-7 text-xs font-medium text-[#f3f4f6] transition-colors hover:border-[#333a4d] focus:border-[#ffe600] focus:outline-none"
+            aria-label="Select aspect ratio"
+            className="cursor-pointer appearance-none rounded border border-[#1f2433] bg-[#11141e] py-1 pl-2.5 pr-6 text-[11px] font-medium text-[#f3f4f6] transition-colors hover:border-[#333a4d] focus:border-[#ffe600] focus:outline-none"
           >
-            <option value="9:16">9:16 (Reels/TikTok)</option>
-            <option value="16:9">16:9 (Landscape)</option>
-            <option value="1:1">1:1 (Square)</option>
+            <option value="16:9">16:9</option>
+            <option value="9:16">9:16</option>
+            <option value="1:1">1:1</option>
           </select>
-          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-[#9ca3af]">
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5 text-[#9ca3af]">
             <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
         </div>
 
-        {/* Data / Privacy info */}
-        <button
-          type="button"
-          onClick={onOpenPrivacyNotice}
-          title="Data protection and Meta AI credits disclosure"
-          className="flex h-8 items-center gap-1.5 rounded-md border border-[#1f2433] bg-[#11141e] px-2.5 text-xs font-medium text-[#9ca3af] transition-colors hover:border-[#333a4d] hover:text-[#ffffff]"
-        >
-          <svg className="h-3.5 w-3.5 text-[#ffe600]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="hidden lg:inline">Notice</span>
-        </button>
-
         {/* Share Button */}
         <button
           type="button"
           onClick={handleShareClick}
-          className="flex h-8 items-center gap-1.5 rounded-md border border-[#1f2433] bg-[#11141e] px-3 text-xs font-semibold text-[#f3f4f6] transition-colors hover:border-[#333a4d] hover:bg-[#161a26]"
+          className="flex h-7 items-center gap-1.5 rounded border border-[#1f2433] bg-[#11141e] px-2.5 text-[11px] font-semibold text-[#f3f4f6] transition-colors hover:border-[#333a4d] hover:bg-[#161a26]"
         >
           <svg className="h-3.5 w-3.5 text-[#9ca3af]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
           </svg>
           <span>Share</span>
         </button>
@@ -190,7 +185,7 @@ export function TopCommandBar({
           type="button"
           onClick={handleExportClick}
           disabled={isExporting}
-          className="flex h-8 items-center gap-1.5 rounded-md bg-[#ffe600] px-3.5 text-xs font-bold text-[#000000] shadow-[0_0_12px_rgba(255,230,0,0.25)] transition-all hover:bg-[#fff04d] active:scale-98 disabled:opacity-50"
+          className="flex h-7 items-center gap-1.5 rounded bg-[#ffe600] px-3.5 text-xs font-bold text-[#000000] shadow-[0_0_12px_rgba(255,230,0,0.3)] transition-all hover:bg-[#fff04d] active:scale-98 disabled:opacity-50"
         >
           {isExporting ? (
             <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -198,11 +193,11 @@ export function TopCommandBar({
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
             </svg>
           ) : (
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            <svg className="h-3 w-3 fill-current" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
             </svg>
           )}
-          <span>{isExporting ? "Rendering..." : "Export Cut"}</span>
+          <span>{isExporting ? "Rendering..." : "Export"}</span>
         </button>
       </div>
     </header>

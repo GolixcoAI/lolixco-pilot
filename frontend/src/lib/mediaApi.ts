@@ -252,7 +252,7 @@ export async function analyzeMedia(
     targetDuration: number;
   },
   confirmedConsent: boolean,
-  provider?: "baseten" | "meta" | "mock",
+  provider?: import("@/types/workstation").AIProviderName,
 ): Promise<import("@/types/workstation").AnalysisResponseData> {
   const { apiBaseUrl } = getFrontendConfig();
   const headers = await getAuthHeaders();
@@ -371,6 +371,38 @@ export interface ChatDirectorEvidence {
   description: string;
   confidence: string;
   phase: string;
+  thumbnail_url?: string | null;
+}
+
+export interface ChatSceneBreakdown {
+  id: string;
+  start_seconds: number;
+  end_seconds: number;
+  timecode_range: string;
+  title: string;
+  description: string;
+  thumbnail_url: string;
+  editing_direction?: string | null;
+}
+
+export interface ChatEditRecommendation {
+  id: string;
+  text: string;
+  checked: boolean;
+  action_type: string;
+  timestamp_seconds?: number | null;
+}
+
+export interface ChatInferenceTrace {
+  provider: string;
+  model: string;
+  task: string;
+  status: string;
+  latency_ms: number;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  cost_usd?: number | null;
 }
 
 export interface ChatDirectorMessage {
@@ -381,10 +413,18 @@ export interface ChatDirectorMessage {
   timecode_jump?: number | null;
   suggested_action?: string | null;
   evidence_cards?: ChatDirectorEvidence[];
+  scene_breakdown?: ChatSceneBreakdown[];
+  edit_recommendations?: ChatEditRecommendation[];
+  inference_trace?: ChatInferenceTrace[];
 }
 
 export interface ChatDirectorResponse {
   message: ChatDirectorMessage;
+  provider_used?: string;
+  model_used?: string;
+  inference_trace?: ChatInferenceTrace[];
+  scene_breakdown?: ChatSceneBreakdown[];
+  edit_recommendations?: ChatEditRecommendation[];
   updated_blueprint?: Record<string, unknown>;
 }
 
@@ -395,6 +435,7 @@ export async function sendChatMessage(
   projectId: string,
   message: string,
   mediaId?: string,
+  provider: string = "auto",
 ): Promise<ChatDirectorResponse> {
   const { apiBaseUrl } = getFrontendConfig();
   const headers = await getAuthHeaders();
@@ -405,12 +446,70 @@ export async function sendChatMessage(
     body: JSON.stringify({
       message,
       media_id: mediaId || null,
+      provider: provider || "auto",
     }),
   });
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.detail || `Chat query failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Fetch live AI and cloud infrastructure usage metrics.
+ */
+export async function fetchUsageTelemetry(): Promise<{
+  total_ai_calls: number;
+  estimated_total_cost_usd: number;
+  modal: {
+    calls: number;
+    tokens_prompt: number;
+    tokens_completion: number;
+    total_tokens: number;
+    compute_seconds: number;
+    estimated_cost_usd: number;
+    last_model_used: string | null;
+    last_call_at: string | null;
+  };
+  meta: {
+    calls: number;
+    tokens_prompt: number;
+    tokens_completion: number;
+    total_tokens: number;
+    compute_seconds: number;
+    estimated_cost_usd: number;
+    last_model_used: string | null;
+    last_call_at: string | null;
+  };
+  baseten: {
+    calls: number;
+    tokens_prompt: number;
+    tokens_completion: number;
+    total_tokens: number;
+    compute_seconds: number;
+    estimated_cost_usd: number;
+    last_model_used: string | null;
+    last_call_at: string | null;
+  };
+  lambda_processor: {
+    calls: number;
+    tokens_prompt: number;
+    tokens_completion: number;
+    total_tokens: number;
+    compute_seconds: number;
+    estimated_cost_usd: number;
+    last_model_used: string | null;
+    last_call_at: string | null;
+  };
+  session_started_at: string;
+  last_updated_at: string;
+}> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const res = await fetch(`${apiBaseUrl}/api/v1/telemetry/usage`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Telemetry fetch failed (${res.status})`);
   }
   return res.json();
 }

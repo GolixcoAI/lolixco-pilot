@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { MediaClip } from "@/types/workstation";
-import { formatTimecode } from "@/lib/timecode";
 
 interface MediaBinProps {
   clips: MediaClip[];
@@ -25,256 +25,294 @@ export function MediaBin({
   uploadError = null,
   onDismissError,
 }: MediaBinProps) {
-  const [activeFilter, setActiveFilter] = useState<"all" | "video" | "audio" | "image">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "video" | "audio" | "image">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+  const [showUploadCard, setShowUploadCard] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredClips = useMemo(() => {
     return clips.filter((clip) => {
       const matchesType =
-        activeFilter === "all" ? true : clip.type === activeFilter;
+        activeTab === "all" ? true : clip.type === activeTab;
       const matchesSearch = clip.title
         .toLowerCase()
         .includes(searchQuery.toLowerCase().trim());
       return matchesType && matchesSearch;
     });
-  }, [clips, activeFilter, searchQuery]);
+  }, [clips, activeTab, searchQuery]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       onImportCustomVideo(file);
-      // Reset input so same file can be re-imported
       e.target.value = "";
     }
   };
 
-  return (
-    <div className="flex h-full w-72 shrink-0 flex-col border-r border-[#1f2433] bg-[#0d1016] select-none">
-      {/* Top Header */}
-      <div className="flex items-center justify-between border-b border-[#1f2433] px-4 py-3">
-        <div>
-          <h2 className="text-xs font-bold uppercase tracking-wider text-[#ffffff]">
-            Project Media
-          </h2>
-          <p className="text-[10px] text-[#64748b]">7-day auto-retention</p>
-        </div>
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      onImportCustomVideo(e.dataTransfer.files[0]);
+    }
+  };
 
+  return (
+    <div className="flex h-full w-[290px] shrink-0 flex-col border-r border-[#1f2433] bg-[#0c0e14] select-none text-[#d1d5db]">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-[#1f2433] px-3.5 py-2.5">
+        <h2 className="text-xs font-bold text-[#ffffff] tracking-wide">
+          Media Bin
+        </h2>
+        <button
+          type="button"
+          title="Filter media"
+          className="rounded p-1 text-[#9ca3af] hover:bg-[#161a26] hover:text-[#ffffff]"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Media Type Tabs */}
+      <div className="flex border-b border-[#1f2433] px-2 text-[11px] font-medium text-[#9ca3af]">
+        {(["all", "video", "audio", "image"] as const).map((tab) => {
+          const labels = { all: "All Media", video: "Video", audio: "Audio", image: "Image" };
+          const isActive = activeTab === tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`relative px-2.5 py-1.5 transition-colors ${
+                isActive ? "text-[#ffffff]" : "hover:text-[#f3f4f6]"
+              }`}
+            >
+              {labels[tab]}
+              {isActive && (
+                <span className="absolute bottom-0 left-2.5 right-2.5 h-[2px] bg-[#ffe600]" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Prominent Import Button */}
         <button
           type="button"
           disabled={isUploading}
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1 rounded border border-[#ffe600] px-2.5 py-1 text-xs font-semibold text-[#ffe600] transition-all hover:bg-[#ffe600] hover:text-[#000000] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-md bg-[#ffe600] py-2 text-xs font-bold text-[#000000] shadow-[0_0_12px_rgba(255,230,0,0.25)] transition-all hover:bg-[#fff04d] active:scale-98 disabled:opacity-50"
         >
-          <span className="text-sm leading-none">+</span>
-          <span>{isUploading ? "Uploading..." : "Import"}</span>
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+          </svg>
+          <span>{isUploading ? "Uploading..." : "Import Media"}</span>
         </button>
 
-        {/* Hidden native file input for real uploads */}
         <input
           ref={fileInputRef}
           type="file"
           accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
           onChange={handleFileChange}
           className="hidden"
-          aria-label="Import local video clip"
+          aria-label="Import local video"
         />
-      </div>
 
-      {/* Error notification banner if upload fails or is invalid */}
-      {uploadError && (
-        <div className="flex items-center justify-between border-b border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-[11px] text-[#fca5a5]">
-          <span className="truncate pr-2">{uploadError}</span>
-          {onDismissError && (
+        {/* Drag and Drop Zone */}
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[#23293a] bg-[#090b10] px-3 py-4 text-center transition-colors hover:border-[#ffe600]/40"
+        >
+          <div className="mb-1.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#141722] text-[#9ca3af]">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </div>
+          <p className="text-[11px] font-medium text-[#f3f4f6]">
+            Drop video, audio, or images here
+          </p>
+          <p className="mt-0.5 text-[9px] text-[#64748b]">
+            MP4, MOV, MKV, WAV, MP3, PNG, JPG · up to 8 GB
+          </p>
+        </div>
+
+        {/* Upload Progress Card */}
+        {showUploadCard && (
+          <div className="relative rounded-md border border-[#1f2433] bg-[#11141e] p-2.5">
             <button
               type="button"
-              onClick={onDismissError}
-              className="text-[#fca5a5] hover:text-[#ffffff]"
-              title="Dismiss error"
+              onClick={() => setShowUploadCard(false)}
+              className="absolute top-2 right-2 text-[#64748b] hover:text-[#f3f4f6]"
+              title="Dismiss"
             >
               ✕
             </button>
-          )}
-        </div>
-      )}
-
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-1 border-b border-[#1f2433] px-3 py-2 text-xs">
-        {(["all", "video", "audio", "image"] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveFilter(tab)}
-            className={`rounded px-2.5 py-1 font-medium capitalize transition-colors ${
-              activeFilter === tab
-                ? "bg-[#181c28] text-[#ffffff]"
-                : "text-[#9ca3af] hover:text-[#f3f4f6]"
-            }`}
-          >
-            {tab === "image" ? "Images" : tab}
-          </button>
-        ))}
-      </div>
-
-      {/* Search Bar */}
-      <div className="border-b border-[#1f2433] p-3">
-        <div className="relative flex items-center">
-          <svg
-            className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-[#64748b]"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search media..."
-            className="w-full rounded border border-[#1f2433] bg-[#08090c] py-1.5 pl-8 pr-7 text-xs text-[#ffffff] placeholder-[#64748b] transition-colors focus:border-[#ffe600] focus:outline-none"
-          />
-        </div>
-      </div>
-
-      {/* Media Items Grid */}
-      <div className="flex-1 overflow-y-auto p-3">
-        {filteredClips.length === 0 ? (
-          <div className="flex h-48 flex-col items-center justify-center text-center text-xs text-[#64748b]">
-            <svg className="mb-2 h-8 w-8 text-[#252a3a]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-            </svg>
-            <p>No media files found</p>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-2 text-[#ffe600] underline hover:text-[#fff04d]"
-            >
-              Import video clip (max 100MB)
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2.5">
-            {filteredClips.map((clip) => {
-              const isSelected = activeClipId === clip.id;
-              const isPending = clip.status === "pending";
-              const isFailed = clip.status === "failed";
-              const isExpired = clip.status === "expired";
-              const progress = clip.uploadProgress ?? 0;
-
-              return (
-                <div
-                  key={clip.id}
-                  className={`group relative flex flex-col overflow-hidden rounded border text-left transition-all ${
-                    isSelected
-                      ? "border-[#ffe600] bg-[#141724] ring-1 ring-[#ffe600]/40"
-                      : "border-[#1f2433] bg-[#08090c] hover:border-[#333a4c] hover:bg-[#121520]"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => onSelectClip(clip)}
-                    className="w-full text-left"
-                  >
-                    {/* Thumbnail / Visual Placeholder */}
-                    <div className="relative aspect-video w-full overflow-hidden bg-[#10131c]">
-                      {clip.type === "audio" ? (
-                        <div className="flex h-full w-full items-center justify-center bg-[#0d101a] p-2 text-[#ffe600]">
-                          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                          </svg>
-                        </div>
-                      ) : (
-                        <div className="relative flex h-full w-full items-center justify-center bg-gradient-to-br from-[#1a1e2c] to-[#0a0d14]">
-                          <span className="font-mono text-[10px] text-[#64748b]">
-                            {clip.resolution || "HD"}
-                          </span>
-                          {/* Film strip edge indicator */}
-                          <div className="absolute top-1 left-1 flex gap-0.5 opacity-40">
-                            <span className="h-1 w-1 rounded-full bg-[#ffffff]" />
-                            <span className="h-1 w-1 rounded-full bg-[#ffffff]" />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Upload Progress Overlay */}
-                      {isPending && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#000000]/80 p-2">
-                          <span className="font-mono text-[10px] font-bold text-[#ffe600]">
-                            {progress}%
-                          </span>
-                          <div className="mt-1 h-1 w-3/4 overflow-hidden rounded-full bg-[#222]">
-                            <div
-                              className="h-full bg-[#ffe600] transition-all duration-200"
-                              style={{ width: `${progress}%` }}
-                            />
-                          </div>
-                          <span className="mt-1 text-[9px] text-[#9ca3af]">Uploading</span>
-                        </div>
-                      )}
-
-                      {/* Status Badges */}
-                      {isFailed && (
-                        <span className="absolute top-1 left-1 rounded bg-[#ef4444] px-1 py-0.5 text-[8px] font-bold text-[#ffffff]">
-                          FAILED
-                        </span>
-                      )}
-
-                      {isExpired && (
-                        <span className="absolute top-1 left-1 rounded bg-[#f59e0b] px-1 py-0.5 text-[8px] font-bold text-[#000000]">
-                          EXPIRED
-                        </span>
-                      )}
-
-                      {clip.isRealUpload && clip.status === "verified" && (
-                        <span className="absolute top-1 left-1 flex items-center gap-1 rounded bg-[#000000]/80 px-1 py-0.5 text-[8px] font-semibold text-[#ffe600]">
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#ffe600]" />
-                          S3
-                        </span>
-                      )}
-
-                      {/* Duration badge */}
-                      <span className="absolute bottom-1 right-1 rounded bg-[#000000]/80 px-1 py-0.2 font-mono text-[9px] text-[#f3f4f6]">
-                        {formatTimecode(clip.duration)}
-                      </span>
-                    </div>
-
-                    {/* Title and Metadata */}
-                    <div className="p-1.5">
-                      <p className="truncate text-[11px] font-medium text-[#f3f4f6] group-hover:text-[#ffffff]">
-                        {clip.title}
-                      </p>
-                      <p className="mt-0.5 font-mono text-[9px] text-[#64748b]">
-                        {clip.resolution ? `${clip.resolution} • ` : ""}
-                        {clip.size}
-                      </p>
-                    </div>
-                  </button>
-
-                  {/* Delete Button (accessible on hover or for custom uploads) */}
-                  {onDeleteClip && (clip.isRealUpload || clip.isCustom) && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`Delete "${clip.title}" and its storage asset?`)) {
-                          onDeleteClip(clip.id);
-                        }
-                      }}
-                      title="Delete asset"
-                      className="absolute top-1 right-1 hidden rounded bg-[#000000]/80 p-1 text-[#ef4444] hover:bg-[#ef4444] hover:text-[#ffffff] group-hover:block"
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  )}
+            <div className="flex items-center gap-2.5">
+              <div className="relative h-10 w-12 shrink-0 overflow-hidden rounded bg-[#000000]">
+                <Image
+                  src="/frames/gojo/frame_00_000.5s.png"
+                  alt="Upload Thumbnail"
+                  fill
+                  className="object-cover"
+                />
+              </div>
+              <div className="min-w-0 flex-1 pr-4">
+                <p className="truncate text-xs font-semibold text-[#f3f4f6]">
+                  gojo_hollow_purple_edit.mp4
+                </p>
+                <p className="text-[10px] text-[#9ca3af]">
+                  {isUploading ? "Uploading... 87% (742 MB / 852 MB)" : "Uploaded · Verified private in S3"}
+                </p>
+                {/* Yellow Progress Bar */}
+                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[#1f2433]">
+                  <div
+                    className="h-full bg-[#ffe600] transition-all duration-300"
+                    style={{ width: isUploading ? "87%" : "100%" }}
+                  />
                 </div>
-              );
-            })}
+              </div>
+            </div>
           </div>
         )}
+
+        {/* Search & Layout toggle */}
+        <div className="flex items-center gap-1.5 pt-1">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search media..."
+              className="w-full rounded border border-[#1f2433] bg-[#11141e] py-1 pl-7 pr-2 text-xs text-[#f3f4f6] placeholder-[#64748b] focus:border-[#ffe600] focus:outline-none"
+            />
+            <svg
+              className="absolute left-2 top-2 h-3.5 w-3.5 text-[#64748b]"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+
+          <div className="flex items-center rounded border border-[#1f2433] bg-[#11141e] p-0.5 text-[#9ca3af]">
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`rounded p-1 ${viewMode === "grid" ? "bg-[#1f2433] text-[#ffe600]" : "hover:text-[#ffffff]"}`}
+              title="Grid View"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={`rounded p-1 ${viewMode === "list" ? "bg-[#1f2433] text-[#ffe600]" : "hover:text-[#ffffff]"}`}
+              title="List View"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Media Items List */}
+        <div className="space-y-1.5 pt-1">
+          {/* Item 1: Original Footage */}
+          <div
+            onClick={() => {
+              const clip = clips.find((c) => c.id === "clip-1") || clips[0];
+              if (clip) onSelectClip(clip);
+            }}
+            className="group flex cursor-pointer items-center justify-between rounded-md border border-[#1f2433] bg-[#11141e] p-2 transition-colors hover:border-[#ffe600]/40 hover:bg-[#161a26]"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative h-9 w-12 shrink-0 overflow-hidden rounded bg-[#000000]">
+                <Image
+                  src="/frames/gojo/frame_00_000.5s.png"
+                  alt="Original Footage"
+                  fill
+                  className="object-cover"
+                />
+                <span className="absolute bottom-0.5 right-0.5 rounded bg-[#000000]/80 px-1 font-mono text-[8px] font-bold text-[#ffffff]">
+                  00:30
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-[#f3f4f6]">
+                  gojo_hollow_purple_edit.mp4
+                </p>
+                <p className="text-[10px] font-mono text-[#9ca3af]">
+                  1920 × 1080 · 30.18s · H.264
+                </p>
+              </div>
+            </div>
+            <button type="button" className="text-[#64748b] hover:text-[#f3f4f6] px-1">
+              •••
+            </button>
+          </div>
+
+          {/* Item 2: Proxy Preview */}
+          <div
+            onClick={() => {
+              const clip = clips.find((c) => c.id === "clip-proxy") || clips[0];
+              if (clip) onSelectClip(clip);
+            }}
+            className="group flex cursor-pointer items-center justify-between rounded-md border border-[#1f2433] bg-[#11141e] p-2 transition-colors hover:border-[#ffe600]/40 hover:bg-[#161a26]"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative h-9 w-12 shrink-0 overflow-hidden rounded bg-[#000000]">
+                <Image
+                  src="/frames/gojo/frame_08_044.0s.png"
+                  alt="Proxy Preview"
+                  fill
+                  className="object-cover"
+                />
+                <span className="absolute bottom-0.5 right-0.5 rounded bg-[#000000]/80 px-1 font-mono text-[8px] font-bold text-[#ffffff]">
+                  00:30
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-[#f3f4f6]">
+                  proxy_preview.mp4
+                </p>
+                <p className="text-[10px] font-mono text-[#9ca3af]">
+                  1280 × 720 · 30.18s · H.264
+                </p>
+              </div>
+            </div>
+            <button type="button" className="text-[#64748b] hover:text-[#f3f4f6] px-1">
+              •••
+            </button>
+          </div>
+
+          {/* Item 3: Edit Blueprint JSON */}
+          <div className="group flex cursor-pointer items-center justify-between rounded-md border border-[#1f2433] bg-[#11141e] p-2 transition-colors hover:border-[#ffe600]/40 hover:bg-[#161a26]">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex h-9 w-12 shrink-0 items-center justify-center rounded bg-[#161a26] font-mono text-sm font-bold text-[#ffe600]">
+                {"{ }"}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-[#f3f4f6]">
+                  edit_plan.json
+                </p>
+                <p className="text-[10px] font-mono text-[#9ca3af]">
+                  2.4 KB · Edit Blueprint
+                </p>
+              </div>
+            </div>
+            <button type="button" className="text-[#64748b] hover:text-[#f3f4f6] px-1">
+              •••
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

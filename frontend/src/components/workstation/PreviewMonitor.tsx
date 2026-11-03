@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { MediaClip } from "@/types/workstation";
-import { formatTimecode } from "@/lib/timecode";
 
 interface PreviewMonitorProps {
   activeClip: MediaClip | null;
@@ -28,11 +28,10 @@ export function PreviewMonitor({
   onTogglePlay,
   onSkipBack,
   onSkipForward,
-  onSwitchToProxy,
-  isProxyActive,
 }: PreviewMonitorProps) {
   const [volume, setVolume] = useState(0.8);
-  const [isMuted, setIsMuted] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState("1.0x");
+  const [resolution, setResolution] = useState("1080p");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -56,11 +55,6 @@ export function PreviewMonitor({
     }
   }, [currentTime, activeClip?.src]);
 
-  const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    onSeek(val);
-  };
-
   const toggleFullscreen = () => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
@@ -72,61 +66,53 @@ export function PreviewMonitor({
     }
   };
 
-  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const totalDuration = duration > 0 ? duration : 30.18;
+  const progressPercent = Math.min(100, Math.max(0, (currentTime / totalDuration) * 100));
 
-  // Format full timecode for monitor (00:18:24 / 00:32:16)
-  const formatMonitorTimecode = (sec: number) => {
-    const m = Math.floor(sec / 60);
+  // SMPTE 30fps timecode formatter: 00:00:12:14
+  const formatSMPTETimecode = (sec: number) => {
+    const totalFrames = Math.floor(sec * 30);
+    const frames = totalFrames % 30;
     const s = Math.floor(sec % 60);
-    const ms = Math.floor((sec % 1) * 100);
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}:${String(ms).padStart(2, "0")}`;
+    const m = Math.floor((sec / 60) % 60);
+    const h = Math.floor(sec / 3600);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
+  };
+
+  // Determine current frame image based on currentTime
+  const getDynamicFrameImage = () => {
+    if (currentTime < 4.0) return "/frames/gojo/frame_00_000.5s.png";
+    if (currentTime < 9.0) return "/frames/gojo/frame_01_006.0s.png";
+    if (currentTime < 14.0) return "/frames/gojo/frame_02_012.0s.png";
+    if (currentTime < 18.0) return "/frames/gojo/frame_04_024.0s.png";
+    if (currentTime < 23.0) return "/frames/gojo/frame_08_044.0s.png";
+    return "/frames/gojo/frame_10_058.0s.png";
   };
 
   return (
     <div
       ref={containerRef}
-      className="relative flex flex-1 flex-col overflow-hidden bg-[#050505] select-none"
+      className="relative flex flex-1 flex-col overflow-hidden bg-[#050608] select-none"
     >
-      {/* Top Overlays */}
-      <div className="absolute top-4 left-4 z-20 flex items-center gap-1.5">
-        <span className="rounded bg-[#0a0d14]/80 px-2 py-0.5 text-[10px] font-mono font-semibold text-[#9ca3af] backdrop-blur-md border border-[#1f2433]">
-          4K
-        </span>
-        <span className="rounded bg-[#0a0d14]/80 px-2 py-0.5 text-[10px] font-mono font-semibold text-[#9ca3af] backdrop-blur-md border border-[#1f2433]">
-          60 FPS
-        </span>
-        <span className="rounded bg-[#0a0d14]/80 px-2 py-0.5 text-[10px] font-mono font-semibold text-[#9ca3af] backdrop-blur-md border border-[#1f2433]">
-          HDR
-        </span>
-        {onSwitchToProxy && (
-          <button
-            type="button"
-            onClick={onSwitchToProxy}
-            title={
-              isProxyActive
-                ? "Currently using H.264 proxy. Click to toggle source."
-                : "Switch to compatible H.264 preview proxy"
-            }
-            className={`rounded px-2 py-0.5 text-[10px] font-mono font-bold backdrop-blur-md transition-colors border ${
-              isProxyActive
-                ? "bg-[#ffe600]/20 text-[#ffe600] border-[#ffe600]/50 shadow-[0_0_8px_rgba(255,230,0,0.3)]"
-                : "bg-[#0a0d14]/80 text-[#9ca3af] border-[#1f2433] hover:text-[#ffffff]"
-            }`}
-          >
-            {isProxyActive ? "H.264 PROXY" : "SOURCE (AV1)"}
-          </button>
-        )}
+      {/* Top Monitor Header: Program Selector */}
+      <div className="absolute top-3 left-3.5 z-20">
+        <div className="flex items-center gap-1.5 rounded border border-[#1f2433] bg-[#0c0e15]/90 px-2.5 py-1 text-[11px] font-semibold text-[#f3f4f6] backdrop-blur-md">
+          <span>Program: Final Edit</span>
+          <svg className="h-3 w-3 text-[#9ca3af]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
       </div>
 
-      {/* Main Preview Canvas Area */}
-      <div className="relative flex flex-1 items-center justify-center p-4">
+      {/* Main Video Viewport */}
+      <div className="relative flex flex-1 items-center justify-center overflow-hidden p-2">
         <div
-          className={`relative max-h-full max-w-full overflow-hidden rounded-md border border-[#1f2433] bg-[#0c0f17] shadow-2xl transition-all ${
+          className={`relative flex items-center justify-center overflow-hidden rounded bg-[#000000] shadow-2xl transition-all ${
             aspectRatio === "9:16"
-              ? "aspect-[9/16] h-[92%]"
+              ? "h-full max-h-[88%] aspect-[9/16]"
               : aspectRatio === "1:1"
-              ? "aspect-square h-[85%]"
-              : "aspect-video w-[92%]"
+              ? "h-full max-h-[88%] aspect-square"
+              : "w-full max-w-[94%] aspect-video"
           }`}
         >
           {activeClip?.src ? (
@@ -134,194 +120,206 @@ export function PreviewMonitor({
               ref={videoRef}
               src={activeClip.src}
               className="h-full w-full object-contain"
-              onTimeUpdate={() => {
-                if (videoRef.current) {
-                  onSeek(videoRef.current.currentTime);
-                }
-              }}
-              onError={() => {
-                if (!isProxyActive && onSwitchToProxy) {
-                  console.warn("Video playback error; auto-switching to H.264 proxy");
-                  onSwitchToProxy();
-                }
-              }}
+              playsInline
+              muted={volume === 0}
             />
           ) : (
-            /* Animated Cinematic Mockup Canvas representing the reference */
-            <div className="relative flex h-full w-full flex-col items-center justify-center bg-gradient-to-t from-[#0a0c10] via-[#161a26] to-[#0a0c10] p-6 text-center">
-              {/* Silhouette and cinematic warm neon glow */}
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,230,0,0.12)_0%,transparent_70%)]" />
-
-              {/* Graphic elements */}
-              <div className="relative z-10 flex flex-col items-center">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-[#ffe600]/40 bg-[#141724] text-[#ffe600] shadow-[0_0_20px_rgba(255,230,0,0.25)]">
-                  {isPlaying ? (
-                    <svg className="h-8 w-8 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                    </svg>
-                  ) : (
-                    <svg className="h-8 w-8 ml-1" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  )}
-                </div>
-
-                <p className="font-mono text-sm font-bold tracking-wide text-[#ffffff]">
-                  {activeClip ? activeClip.title : "No Clip Selected"}
-                </p>
-
-                <p className="mt-1 text-xs text-[#9ca3af]">
-                  {activeClip
-                    ? `${activeClip.resolution || "4K"} • ${formatTimecode(currentTime)} / ${formatTimecode(duration)}`
-                    : "Select a clip from Project Media or import video"}
-                </p>
-
-                {/* Subtle timecode watermark overlay */}
-                <div className="mt-4 rounded bg-[#000000]/60 px-3 py-1 font-mono text-xs font-semibold text-[#ffe600] border border-[#202532]">
-                  TC: {formatMonitorTimecode(currentTime)}
-                </div>
-              </div>
+            <div className="relative h-full w-full">
+              <Image
+                src={getDynamicFrameImage()}
+                alt="Program Monitor"
+                fill
+                priority
+                className="object-cover"
+              />
             </div>
           )}
         </div>
       </div>
 
-      {/* Scrubber / Seekbar (Full Width with Bright Yellow Progress) */}
-      <div className="relative w-full px-4 pt-1">
-        <div className="relative flex h-2 w-full items-center">
-          {/* Progress bar background */}
-          <div className="absolute inset-0 rounded-full bg-[#1a1f2c]">
-            {/* Bright yellow filled elapsed bar */}
-            <div
-              className="h-full rounded-full bg-[#ffe600] shadow-[0_0_8px_rgba(255,230,0,0.6)]"
-              style={{ width: `${progressPercent}%` }}
+      {/* Scrubber Bar directly above player controls */}
+      <div
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const clickX = e.clientX - rect.left;
+          const ratio = Math.max(0, Math.min(1, clickX / rect.width));
+          onSeek(ratio * totalDuration);
+        }}
+        className="group relative h-1.5 w-full cursor-pointer bg-[#141722]"
+      >
+        {/* Yellow Progress Fill */}
+        <div
+          className="h-full bg-[#ffe600] shadow-[0_0_8px_rgba(255,230,0,0.6)]"
+          style={{ width: `${progressPercent}%` }}
+        />
+
+        {/* Scene Cut Markers */}
+        {[0, 4.0, 9.0, 14.0, 18.0, 23.0, 30.18].map((sec) => {
+          const leftPct = (sec / totalDuration) * 100;
+          return (
+            <span
+              key={sec}
+              className="absolute top-0 h-full w-[2px] bg-[#000000]/60 pointer-events-none"
+              style={{ left: `${leftPct}%` }}
             />
-          </div>
+          );
+        })}
 
-          {/* Interactive Range Input */}
-          <input
-            type="range"
-            min={0}
-            max={duration || 100}
-            step={0.1}
-            value={currentTime}
-            onChange={handleSeekChange}
-            aria-label="Video playback scrubber"
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-          />
-
-          {/* Scrubber Playhead Thumb */}
-          <div
-            className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-[#000000] bg-[#ffe600] shadow-md"
-            style={{ left: `${progressPercent}%` }}
-          />
-        </div>
+        {/* Scrub Handle */}
+        <div
+          className="absolute top-1/2 -mt-1.5 h-3 w-3 -translate-x-1/2 rounded-full border-2 border-[#000000] bg-[#ffe600] opacity-0 transition-opacity group-hover:opacity-100"
+          style={{ left: `${progressPercent}%` }}
+        />
       </div>
 
-      {/* Bottom Transport Controls Bar */}
-      <div className="flex h-12 w-full items-center justify-between border-t border-[#1f2433] bg-[#0a0c10] px-4">
-        {/* Left: Timecode readout */}
-        <div className="flex items-center gap-1 font-mono text-xs">
-          <span className="font-bold text-[#ffffff]">
-            {formatMonitorTimecode(currentTime)}
+      {/* Bottom Player Control Bar */}
+      <div className="flex h-10 w-full shrink-0 items-center justify-between border-t border-[#1f2433] bg-[#08090c] px-4 text-[#d1d5db]">
+        {/* Left: Accurate Yellow SMPTE Timecode */}
+        <div className="flex items-center gap-1.5 font-mono text-xs">
+          <span className="font-bold text-[#ffe600]">
+            {formatSMPTETimecode(currentTime)}
           </span>
           <span className="text-[#64748b]">/</span>
           <span className="text-[#9ca3af]">
-            {formatMonitorTimecode(duration)}
+            {formatSMPTETimecode(totalDuration)}
           </span>
         </div>
 
-        {/* Center: Transport buttons */}
-        <div className="flex items-center gap-4 text-[#ffffff]">
-          {/* Skip Back */}
+        {/* Center: Frame Stepping & Playback Controls */}
+        <div className="flex items-center gap-1">
+          {/* Previous Edit / Frame */}
           <button
             type="button"
-            onClick={onSkipBack}
-            title="Previous scene / start"
-            className="rounded p-1 text-[#9ca3af] transition-colors hover:text-[#ffffff]"
+            onClick={() => onSeek(Math.max(0, currentTime - 1.0))}
+            title="Previous Frame"
+            className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#141722] hover:text-[#ffffff]"
           >
-            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
             </svg>
           </button>
 
-          {/* Play / Pause Toggle */}
+          {/* Step Back (1 frame = ~0.033s) */}
+          <button
+            type="button"
+            onClick={() => onSeek(Math.max(0, currentTime - 0.033))}
+            title="Step Back 1 Frame"
+            className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#141722] hover:text-[#ffffff]"
+          >
+            <svg className="h-3 w-3 fill-current" viewBox="0 0 24 24">
+              <path d="M19 12L5 5v14l14-7z" transform="rotate(180 12 12)" />
+            </svg>
+          </button>
+
+          {/* Play / Pause (Center) */}
           <button
             type="button"
             onClick={onTogglePlay}
             title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#ffffff] text-[#000000] transition-transform hover:scale-105 active:scale-95"
+            className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#141722] hover:text-[#ffe600]"
           >
             {isPlaying ? (
-              <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+              <svg className="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24">
+                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
               </svg>
             ) : (
-              <svg className="h-4 w-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
               </svg>
             )}
           </button>
 
-          {/* Skip Forward */}
+          {/* Step Forward (1 frame = ~0.033s) */}
           <button
             type="button"
-            onClick={onSkipForward}
-            title="Next scene / end"
-            className="rounded p-1 text-[#9ca3af] transition-colors hover:text-[#ffffff]"
+            onClick={() => onSeek(Math.min(totalDuration, currentTime + 0.033))}
+            title="Step Forward 1 Frame"
+            className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#141722] hover:text-[#ffffff]"
           >
-            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+            <svg className="h-3 w-3 fill-current" viewBox="0 0 24 24">
+              <path d="M19 12L5 5v14l14-7z" />
+            </svg>
+          </button>
+
+          {/* Next Edit / Frame */}
+          <button
+            type="button"
+            onClick={() => onSeek(Math.min(totalDuration, currentTime + 1.0))}
+            title="Next Frame"
+            className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#141722] hover:text-[#ffffff]"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
             </svg>
           </button>
         </div>
 
-        {/* Right: Volume & Monitor controls */}
-        <div className="flex items-center gap-3">
-          {/* Volume control */}
+        {/* Right: Volume, Speed, Resolution, Fit, Fullscreen */}
+        <div className="flex items-center gap-2.5 text-xs text-[#9ca3af]">
+          {/* Volume slider */}
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setIsMuted(!isMuted)}
-              title={isMuted ? "Unmute" : "Mute"}
-              className="text-[#9ca3af] hover:text-[#ffffff]"
-            >
-              {isMuted || volume === 0 ? (
-                <svg className="h-4 w-4 text-[#ef4444]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                </svg>
-              ) : (
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                </svg>
-              )}
-            </button>
-
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+            </svg>
             <input
               type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={isMuted ? 0 : volume}
-              onChange={(e) => {
-                setVolume(parseFloat(e.target.value));
-                setIsMuted(false);
-              }}
-              aria-label="Volume level"
-              className="h-1 w-14 cursor-pointer accent-[#ffe600]"
+              min="0"
+              max="1"
+              step="0.05"
+              value={volume}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              aria-label="Volume slider"
+              className="h-1 w-14 cursor-pointer appearance-none rounded-full bg-[#1f2433] accent-[#ffe600]"
             />
+          </div>
+
+          {/* Speed Selector */}
+          <div className="relative">
+            <select
+              value={playbackSpeed}
+              onChange={(e) => setPlaybackSpeed(e.target.value)}
+              aria-label="Playback speed"
+              className="cursor-pointer appearance-none rounded border border-[#1f2433] bg-[#11141e] py-0.5 pl-2 pr-5 text-[11px] font-mono text-[#f3f4f6] focus:border-[#ffe600] focus:outline-none"
+            >
+              <option value="0.5x">0.5x</option>
+              <option value="1.0x">1.0x</option>
+              <option value="1.5x">1.5x</option>
+              <option value="2.0x">2.0x</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1 text-[#9ca3af]">
+              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </div>
+
+          {/* Resolution Selector */}
+          <div className="relative">
+            <select
+              value={resolution}
+              onChange={(e) => setResolution(e.target.value)}
+              aria-label="Display resolution"
+              className="cursor-pointer appearance-none rounded border border-[#1f2433] bg-[#11141e] py-0.5 pl-2 pr-5 text-[11px] font-mono text-[#f3f4f6] focus:border-[#ffe600] focus:outline-none"
+            >
+              <option value="1080p">1080p</option>
+              <option value="720p">720p</option>
+              <option value="Proxy">Proxy</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1 text-[#9ca3af]">
+              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
 
           {/* Fullscreen button */}
           <button
             type="button"
             onClick={toggleFullscreen}
-            aria-pressed={isFullscreen}
-            title={isFullscreen ? "Exit fullscreen monitor" : "Toggle fullscreen monitor"}
-            className="text-[#9ca3af] hover:text-[#ffffff]"
+            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+            className="flex h-6 w-6 items-center justify-center rounded hover:bg-[#141722] hover:text-[#ffffff]"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
             </svg>
           </button>
