@@ -10,6 +10,12 @@ interface ExportModalProps {
   mediaId: string | null;
   projectName: string;
   defaultSegments?: ExportSegmentRequest[];
+  textOverlays?: Array<{
+    text: string;
+    color?: string;
+    start_seconds: number;
+    end_seconds: number;
+  }>;
   onLoadRenderedCut?: (cutUrl: string, duration: number) => void;
 }
 
@@ -25,6 +31,7 @@ export function ExportModal({
     { start_seconds: 34.0, end_seconds: 41.0, title: "Scene 3: Peak Discharge" },
     { start_seconds: 44.0, end_seconds: 50.0, title: "Scene 4: Target Impact & Aftermath" },
   ],
+  textOverlays = [],
   onLoadRenderedCut,
 }: ExportModalProps) {
   const [resolution, setResolution] = useState<"1080p" | "720p">("1080p");
@@ -61,6 +68,7 @@ export function ExportModal({
         segments: defaultSegments,
         resolution,
         include_audio: includeAudio,
+        text_overlays: textOverlays,
       });
       clearInterval(progressTimer);
       setRenderProgress(100);

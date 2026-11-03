@@ -567,6 +567,15 @@ export interface ExportCutResponse {
   expires_in_seconds: number;
 }
 
+export interface ExportTextOverlayRequest {
+  text: string;
+  color?: string;
+  start_seconds: number;
+  end_seconds: number;
+  font_size?: number;
+  position?: string;
+}
+
 /**
  * Render approved editing blueprint into trimmed, concatenated H.264 MP4 export.
  */
@@ -577,6 +586,7 @@ export async function renderExportCut(
     segments: ExportSegmentRequest[];
     resolution?: "1080p" | "720p" | "source";
     include_audio?: boolean;
+    text_overlays?: ExportTextOverlayRequest[];
   },
 ): Promise<ExportCutResponse> {
   const { apiBaseUrl } = getFrontendConfig();

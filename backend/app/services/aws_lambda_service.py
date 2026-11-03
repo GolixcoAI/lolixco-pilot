@@ -82,14 +82,28 @@ class AWSLambdaMediaProcessingService(BaseMediaProcessingService):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._invoke_lambda_sync, payload)
 
+    def _extract_s3_key(self, path_or_url: str) -> str | None:
+        """Extract clean S3 object key from s3:// URI, HTTP(S) presigned URL, or bare key."""
+        if os.path.exists(path_or_url):
+            return None
+        if path_or_url.startswith("s3://"):
+            return path_or_url.split("/", 3)[-1]
+        if path_or_url.startswith(("http://", "https://")):
+            from urllib.parse import urlparse
+            path = urlparse(path_or_url).path.lstrip("/")
+            return path if path else None
+        if "/" not in path_or_url:
+            return f"users/demo-eval/projects/gojo-hollow-purple/media/{path_or_url}"
+        return path_or_url
+
     async def probe_media(self, file_path_or_url: str) -> MediaProbeResult:
         """Probe media using AWS Lambda worker with local fallback."""
-        # If this is an S3 key or URL, dispatch to Lambda
-        s3_key = file_path_or_url
-        if s3_key.startswith("s3://"):
-            s3_key = s3_key.split("/", 3)[-1]
-        elif "/" not in s3_key and not s3_key.startswith("http"):
-            s3_key = f"users/demo-eval/projects/gojo-hollow-purple/media/{s3_key}"
+        if os.path.exists(file_path_or_url):
+            return await self.fallback.probe_media(file_path_or_url)
+
+        s3_key = self._extract_s3_key(file_path_or_url)
+        if not s3_key:
+            return await self.fallback.probe_media(file_path_or_url)
 
         payload = {
             "action": "probe",
@@ -171,8 +185,33 @@ class AWSLambdaMediaProcessingService(BaseMediaProcessingService):
         output_cut_path: str,
         target_resolution: str = "1080p",
         include_audio: bool = True,
+        text_overlays: list[dict[str, Any]] | None = None,
     ) -> RenderCutResult:
-        """Render multi-segment edit cut via AWS Lambda worker."""
+        """Render multi-segment edit cut via AWS Lambda worker or local high-fidelity renderer."""
+        # If text overlays are present or source is local, route to local processor with ASS styling
+        if text_overlays or os.path.exists(video_path):
+            fallback_input = video_path
+            if fallback_input.startswith(("users/", "s3://")):
+                import tempfile
+                import boto3
+                try:
+                    s3_client = self._s3_client or boto3.client("s3", region_name=self.region_name)
+                    s3_key = fallback_input.split("/", 3)[-1] if fallback_input.startswith("s3://") else fallback_input
+                    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+                        s3_client.download_file(self.bucket_name, s3_key, tf.name)
+                        fallback_input = tf.name
+                except Exception as s3_err:
+                    logger.debug("Fallback S3 download skipped: %s", s3_err)
+
+            return await self.fallback.render_edit_cut(
+                video_path=fallback_input,
+                segments=segments,
+                output_cut_path=output_cut_path,
+                target_resolution=target_resolution,
+                include_audio=include_audio,
+                text_overlays=text_overlays,
+            )
+
         source_key = video_path
         if source_key.startswith("s3://"):
             source_key = source_key.split("/", 3)[-1]

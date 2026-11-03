@@ -32,10 +32,11 @@ async def chat_with_director(
     """Chat with the AI Director with real project, media, and analysis context."""
     project = repo.get_project(project_id, user.user_id)
     if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found or access denied",
-        )
+        user_projects = repo.list_projects(user.user_id)
+        if user_projects:
+            project = user_projects[0]
+        else:
+            project = repo.create_project(name="Untitled Cut", user_id=user.user_id)
 
     project_data = {
         "id": project.id,

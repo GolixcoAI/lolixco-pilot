@@ -47,22 +47,42 @@ export default function WorkstationPage() {
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("16:9");
   const [activeTab, setActiveTab] = useState<NavTab>("media");
 
-  // Media and playback state
-  const [clips, setClips] = useState<MediaClip[]>(INITIAL_DEMO_CLIPS);
-  const [activeClipId, setActiveClipId] = useState<string | null>("clip-1");
-  const [currentTime, setCurrentTime] = useState(12.46);
+  // Media and playback state (starts completely empty on first launch)
+  const [clips, setClips] = useState<MediaClip[]>([]);
+  const [activeClipId, setActiveClipId] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(0.0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Creative Director state
+  // Creative Director state (empty moments on first launch)
   const [brief, setBrief] = useState<CreativeBriefState>(INITIAL_BRIEF);
-  const [moments, setMoments] = useState<KeyMoment[]>(INITIAL_KEY_MOMENTS);
-  const [activeMomentId, setActiveMomentId] = useState<string | null>("moment-3");
+  const [moments, setMoments] = useState<KeyMoment[]>([]);
+  const [activeMomentId, setActiveMomentId] = useState<string | null>(null);
   const [aiSuggestions] = useState<string[]>(INITIAL_AI_SUGGESTIONS);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStage, setGenerationStage] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  // Text title overlays (e.g. "Hollow Purple" on V2)
+  const [textOverlays, setTextOverlays] = useState<
+    Array<{
+      id: string;
+      text: string;
+      color: string;
+      start_seconds: number;
+      end_seconds: number;
+      track: string;
+    }>
+  >([]);
+
+  // Active trim selection (e.g. Last 30 seconds: 38.08s to 68.08s)
+  const [activeTrim, setActiveTrim] = useState<{
+    trim_start: number;
+    trim_end: number;
+    source_duration: number;
+    is_active: boolean;
+  } | null>(null);
 
   // Multimodal Media Intelligence & Provider state
   const [selectedProvider, setSelectedProvider] = useState<AIProviderName>("baseten");
@@ -84,8 +104,8 @@ export default function WorkstationPage() {
   const originalSrcRef = useRef<{ [key: string]: string }>({});
 
   // Find currently active clip
-  const activeClip = clips.find((c) => c.id === activeClipId) || clips[0] || null;
-  const clipDuration = activeClip ? activeClip.duration : 32.16;
+  const activeClip = clips.find((c) => c.id === activeClipId) || null;
+  const clipDuration = activeClip ? activeClip.duration : 0.0;
 
   // Playback timer ticker for preview
   const animFrameRef = useRef<number | null>(null);
@@ -555,6 +575,41 @@ export default function WorkstationPage() {
 
   // Apply AI Director generated blueprint scenes directly to timeline
   const handleApplyBlueprint = (blueprint: Record<string, unknown>) => {
+    // 1. Handle Query 2: Text Overlay
+    if (blueprint?.action === "add_text_overlay" && blueprint.overlay) {
+      const o = blueprint.overlay as {
+        id: string;
+        text: string;
+        color: string;
+        start_seconds: number;
+        end_seconds: number;
+        track: string;
+      };
+      setTextOverlays([o]);
+      setCurrentTime(o.start_seconds);
+      return;
+    }
+
+    // 2. Handle Query 3: Last 30 Seconds Trim Selection
+    if (blueprint?.action === "trim_selection") {
+      const trimStart = Number(blueprint.trim_start || 38.08);
+      const trimEnd = Number(blueprint.trim_end || 68.08);
+      const srcDur = Number(blueprint.source_duration || 68.08);
+      setActiveTrim({
+        trim_start: trimStart,
+        trim_end: trimEnd,
+        source_duration: srcDur,
+        is_active: true,
+      });
+      if (Array.isArray(blueprint.remapped_overlays)) {
+        setTextOverlays(
+          blueprint.remapped_overlays as typeof textOverlays
+        );
+      }
+      setCurrentTime(trimStart);
+      return;
+    }
+
     const rawScenes = blueprint?.scenes;
     if (Array.isArray(rawScenes)) {
       const mappedMoments: KeyMoment[] = rawScenes.map((rawScene: unknown, idx: number) => {
@@ -588,6 +643,21 @@ export default function WorkstationPage() {
       }
     }
   };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as unknown as { __workstation: unknown }).__workstation = {
+        setClips,
+        setActiveClipId,
+        setCurrentTime,
+        setMoments,
+        setTextOverlays,
+        setActiveTrim,
+        setIsExportModalOpen,
+        handleApplyBlueprint,
+      };
+    }
+  });
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#050505] text-[#ffffff] font-sans">
@@ -639,6 +709,7 @@ export default function WorkstationPage() {
           onSkipForward={() => setCurrentTime(clipDuration)}
           onSwitchToProxy={handleSwitchToProxy}
           isProxyActive={isProxyActive}
+          textOverlays={textOverlays}
         />
 
         {/* Right AI Director Panel */}
@@ -677,6 +748,8 @@ export default function WorkstationPage() {
         activeClip={activeClip}
         onSeek={(sec) => setCurrentTime(sec)}
         beatTimestamps={beatTimestamps}
+        textOverlays={textOverlays}
+        activeTrim={activeTrim}
       />
 
       {/* Bottom Status Bar */}
@@ -687,7 +760,7 @@ export default function WorkstationPage() {
             <span>Proxy ready (H.264, 1280x720)</span>
           </span>
           <span className="text-[#1f2433]">|</span>
-          <span>30.18s</span>
+          <span>{clipDuration.toFixed(2)}s</span>
           <span className="text-[#1f2433]">|</span>
           <span>30.00 fps</span>
           <span className="text-[#1f2433]">|</span>
@@ -715,7 +788,15 @@ export default function WorkstationPage() {
         mediaId={activeClipId}
         projectName={projectName}
         defaultSegments={
-          moments.length > 0
+          activeTrim?.is_active
+            ? [
+                {
+                  start_seconds: activeTrim.trim_start,
+                  end_seconds: activeTrim.trim_end,
+                  title: "Last 30 Seconds Climax Cut",
+                },
+              ]
+            : moments.length > 0
             ? moments.map((m) => ({
                 start_seconds: m.seconds,
                 end_seconds:
@@ -724,8 +805,15 @@ export default function WorkstationPage() {
                     : Math.min(clipDuration, m.seconds + 5.0),
                 title: m.title,
               }))
-            : undefined
+            : [
+                {
+                  start_seconds: 0.0,
+                  end_seconds: clipDuration > 0 ? clipDuration : 68.08,
+                  title: "Full Cut with Title Overlay",
+                },
+              ]
         }
+        textOverlays={textOverlays}
         onLoadRenderedCut={handleLoadRenderedCut}
       />
     </div>

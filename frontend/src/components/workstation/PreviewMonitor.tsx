@@ -16,6 +16,13 @@ interface PreviewMonitorProps {
   onSkipForward?: () => void;
   onSwitchToProxy?: () => void;
   isProxyActive?: boolean;
+  textOverlays?: Array<{
+    id: string;
+    text: string;
+    color: string;
+    start_seconds: number;
+    end_seconds: number;
+  }>;
 }
 
 export function PreviewMonitor({
@@ -28,6 +35,7 @@ export function PreviewMonitor({
   onTogglePlay,
   onSkipBack,
   onSkipForward,
+  textOverlays = [],
 }: PreviewMonitorProps) {
   const [volume, setVolume] = useState(0.8);
   const [playbackSpeed, setPlaybackSpeed] = useState("1.0x");
@@ -115,7 +123,21 @@ export function PreviewMonitor({
               : "w-full max-w-[94%] aspect-video"
           }`}
         >
-          {activeClip?.src ? (
+          {!activeClip ? (
+            <div className="flex h-full w-full flex-col items-center justify-center p-6 text-center space-y-3 bg-[#0a0c10]">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#141722] border border-[#1f2433] text-xl text-[#ffe600]">
+                ▶
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-[#d1d5db]">
+                  No Media Loaded
+                </p>
+                <p className="mt-1 text-[11px] text-[#64748b]">
+                  Import media into the project bin to start playback, analysis, and editing.
+                </p>
+              </div>
+            </div>
+          ) : activeClip.src ? (
             <video
               ref={videoRef}
               src={activeClip.src}
@@ -134,6 +156,26 @@ export function PreviewMonitor({
               />
             </div>
           )}
+
+          {/* Active Text Title Overlay (e.g. Hollow Purple) */}
+          {activeClip &&
+            textOverlays?.map((ov) => {
+              if (currentTime >= ov.start_seconds && currentTime <= ov.end_seconds) {
+                return (
+                  <div
+                    key={ov.id}
+                    className="absolute bottom-12 left-1/2 -translate-x-1/2 pointer-events-none z-20 animate-fade-in"
+                  >
+                    <div className="rounded border border-[#a855f7]/80 bg-[#000000]/75 px-6 py-2 shadow-[0_0_25px_rgba(168,85,247,0.7)] backdrop-blur-sm">
+                      <span className="font-mono text-2xl font-black uppercase tracking-widest text-[#a855f7] drop-shadow-[0_2px_8px_rgba(168,85,247,0.9)]">
+                        {ov.text}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
         </div>
       </div>
 

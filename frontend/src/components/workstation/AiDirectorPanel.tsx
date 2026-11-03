@@ -67,123 +67,17 @@ export function AiDirectorPanel({
   const [appliedNotice, setAppliedNotice] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // Initial rich conversation history representing the canonical Gojo analysis
-  const [messages, setMessages] = useState<MessageItem[]>([
-    {
-      id: "user-1",
-      role: "user",
-      content:
-        "Analyze this edit and give me a scene breakdown with key moments and an improved edit plan.",
-    },
-    {
-      id: "assistant-1",
-      role: "assistant",
-      content:
-        "Analyzed the footage. Here's the scene breakdown, key moments, and an optimized edit plan.",
-      timecodeJump: 18.0,
-      sceneBreakdown: [
-        {
-          id: "sc-1",
-          start_seconds: 0.0,
-          end_seconds: 4.0,
-          timecode_range: "00:00 - 00:04",
-          title: "Setup · Character introduction",
-          description: "Satoru Gojo mid-air survey, establishing dominant presence",
-          thumbnail_url: "/frames/gojo/frame_00_000.5s.png",
-          editing_direction: "Hold 1080p wide master",
-        },
-        {
-          id: "sc-2",
-          start_seconds: 4.0,
-          end_seconds: 9.0,
-          timecode_range: "00:04 - 00:09",
-          title: "Power build-up · Energy forms (Red)",
-          description: "Cursed Technique Reversal: Red manifests at fingertip",
-          thumbnail_url: "/frames/gojo/frame_01_006.0s.png",
-          editing_direction: "Tighten build-up (-0.8s)",
-        },
-        {
-          id: "sc-3",
-          start_seconds: 9.0,
-          end_seconds: 14.0,
-          timecode_range: "00:09 - 00:14",
-          title: "Power build-up · Energy forms (Blue)",
-          description: "Cursed Technique Lapse: Blue activates on left",
-          thumbnail_url: "/frames/gojo/frame_02_012.0s.png",
-          editing_direction: "Match cut on particle glow",
-        },
-        {
-          id: "sc-4",
-          start_seconds: 14.0,
-          end_seconds: 18.0,
-          timecode_range: "00:14 - 00:18",
-          title: "Convergence · Red + Blue merge",
-          description: "Opposing singularities collide into imaginary mass vortex",
-          thumbnail_url: "/frames/gojo/frame_04_024.0s.png",
-          editing_direction: "Apply speed ramp (0.8x -> 1.3x)",
-        },
-        {
-          id: "sc-5",
-          start_seconds: 18.0,
-          end_seconds: 23.0,
-          timecode_range: "00:18 - 00:23",
-          title: "Peak · Hollow Purple discharge",
-          description: "Hollow Purple released down valley with shockwave ripple",
-          thumbnail_url: "/frames/gojo/frame_08_044.0s.png",
-          editing_direction: "Add impact SFX at 00:18",
-        },
-        {
-          id: "sc-6",
-          start_seconds: 23.0,
-          end_seconds: 30.0,
-          timecode_range: "00:23 - 00:30",
-          title: "Impact · Aftermath and fade",
-          description: "Trench carved into forest landscape, dust clearing",
-          thumbnail_url: "/frames/gojo/frame_10_058.0s.png",
-          editing_direction: "End with short impact hold (0.5s)",
-        },
-      ],
-      editRecommendations: [
-        { id: "rec-1", text: "Tighten build-up (-0.8s)", checked: true, action_type: "cut", timestamp_seconds: 4.0 },
-        { id: "rec-2", text: "Add impact SFX at 00:18", checked: true, action_type: "audio", timestamp_seconds: 18.0 },
-        { id: "rec-3", text: "Apply speed ramp (0.8x -> 1.3x)", checked: true, action_type: "speed_ramp", timestamp_seconds: 14.0 },
-        { id: "rec-4", text: "Enhance contrast and glow", checked: true, action_type: "effect", timestamp_seconds: 18.0 },
-        { id: "rec-5", text: "End with a short impact hold (0.5s)", checked: true, action_type: "cut", timestamp_seconds: 28.5 },
-      ],
-      inferenceTrace: [
-        {
-          provider: "modal",
-          model: "Muse Glimmer 30B",
-          task: "vision",
-          status: "success",
-          latency_ms: 4210.0,
-          cost_usd: 0.00557,
-        },
-        {
-          provider: "meta",
-          model: "Muse Spark",
-          task: "reasoning",
-          status: "success",
-          latency_ms: 2730.0,
-          prompt_tokens: 60,
-          completion_tokens: 500,
-          total_tokens: 560,
-          cost_usd: 0.00031,
-        },
-        {
-          provider: "baseten",
-          model: "Muse Spark Open",
-          task: "edit_plan",
-          status: "success",
-          latency_ms: 3060.0,
-          prompt_tokens: 185,
-          completion_tokens: 400,
-          total_tokens: 585,
-          cost_usd: 0.00036,
-        },
-      ],
-    },
-  ]);
+  // Initial conversation is empty on first launch for a clean dashboard
+  const [messages, setMessages] = useState<MessageItem[]>([]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as unknown as { __aiDirector: unknown }).__aiDirector = {
+        setMessages,
+        handleSendMessage,
+      };
+    }
+  });
 
   const handleProviderSelect = (p: AIProviderName) => {
     setProvider(p);
@@ -204,7 +98,12 @@ export function AiDirectorPanel({
     setIsLoading(true);
 
     try {
-      const activeProjId = projectId || "active-project";
+      let activeProjId = projectId;
+      if (!activeProjId) {
+        const { getOrCreateProject } = await import("@/lib/mediaApi");
+        const proj = await getOrCreateProject();
+        activeProjId = proj.id;
+      }
       const resp = await sendChatMessage(
         activeProjId,
         promptText,
@@ -227,6 +126,11 @@ export function AiDirectorPanel({
       // If timecode jump is present, seek player
       if (resp.message.timecode_jump !== undefined && resp.message.timecode_jump !== null) {
         onJumpToMoment(resp.message.timecode_jump, "ai-seek");
+      }
+
+      // If updated blueprint or timeline action returned, apply to workstation
+      if (resp.updated_blueprint && onApplyBlueprint) {
+        onApplyBlueprint(resp.updated_blueprint as Record<string, unknown>);
       }
     } catch {
       // Graceful offline response
@@ -347,7 +251,64 @@ export function AiDirectorPanel({
 
       {/* Conversational Feed */}
       <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-3 space-y-3.5">
-        {messages.map((msg) => {
+        {messages.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center p-4 text-center space-y-4 my-auto">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#141722] border border-[#1f2433] text-lg text-[#ffe600]">
+              ✦
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-[#ffffff] uppercase tracking-wider">
+                AI Director Workstation
+              </h3>
+              <p className="mt-1 text-[11px] text-[#9ca3af] leading-relaxed max-w-[280px]">
+                From raw footage to a stronger cut. Choose a demonstration query below or type your own instructions:
+              </p>
+            </div>
+
+            <div className="w-full space-y-2 pt-2 text-left">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-[#64748b]">
+                Demonstration Queries:
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  handleSendMessage(
+                    "Review my edit. Give me suggestions on what I should improve and tell me exactly where I should edit."
+                  )
+                }
+                className="w-full rounded border border-[#1f2433] bg-[#11141e] p-2.5 text-left text-[11px] text-[#d1d5db] hover:border-[#ffe600]/60 hover:text-[#ffffff] transition-all"
+              >
+                <span className="text-[#ffe600] font-bold">1. </span>
+                Review my edit. Give me suggestions on what I should improve and tell me exactly where I should edit.
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleSendMessage(
+                    "Locate Hollow Purple and add the text 'Hollow Purple' in purple colour from 00:37 to 00:44."
+                  )
+                }
+                className="w-full rounded border border-[#1f2433] bg-[#11141e] p-2.5 text-left text-[11px] text-[#d1d5db] hover:border-[#a855f7]/60 hover:text-[#ffffff] transition-all"
+              >
+                <span className="text-[#a855f7] font-bold">2. </span>
+                Locate Hollow Purple and add the text 'Hollow Purple' in purple colour from 00:37 to 00:44.
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleSendMessage(
+                    "Keep the last 30 seconds from this video and prepare it for export."
+                  )
+                }
+                className="w-full rounded border border-[#1f2433] bg-[#11141e] p-2.5 text-left text-[11px] text-[#d1d5db] hover:border-[#ffe600]/60 hover:text-[#ffffff] transition-all"
+              >
+                <span className="text-[#ffe600] font-bold">3. </span>
+                Keep the last 30 seconds from this video and prepare it for export.
+              </button>
+            </div>
+          </div>
+        ) : (
+          messages.map((msg) => {
           const isUser = msg.role === "user";
           return (
             <div key={msg.id} className="space-y-2">
@@ -490,7 +451,8 @@ export function AiDirectorPanel({
               )}
             </div>
           );
-        })}
+        })
+      )}
 
         {isLoading && (
           <div className="flex items-center gap-2 rounded-lg border border-[#1f2433] bg-[#0c0e15] p-3 text-xs text-[#ffe600]">

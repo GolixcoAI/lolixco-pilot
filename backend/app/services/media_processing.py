@@ -122,6 +122,7 @@ class BaseMediaProcessingService(ABC):
         output_cut_path: str,
         target_resolution: str = "1080p",
         include_audio: bool = True,
+        text_overlays: list[dict[str, Any]] | None = None,
     ) -> RenderCutResult:
         """Trim and concatenate segments into an export cut."""
         ...
@@ -465,6 +466,45 @@ class LocalMediaProcessingService(BaseMediaProcessingService):
             logger.warning("generate_h264_proxy error: %s", exc)
             return False
 
+    def _create_ass_file(self, text_overlays: list[dict[str, Any]], output_path: str) -> None:
+        """Generate an Advanced SubStation Alpha subtitle file for antialiased title overlays."""
+        def format_tc(s: float) -> str:
+            h = int(s // 3600)
+            m = int((s % 3600) // 60)
+            sec = s % 60
+            return f"{h}:{m:02d}:{sec:05.2f}"
+
+        events: list[str] = []
+        for o in text_overlays:
+            text = str(o.get("text", "")).strip()
+            if not text:
+                continue
+            color_hex = str(o.get("color", "#a855f7")).lstrip("#")
+            if len(color_hex) == 6:
+                r, g, b = color_hex[0:2], color_hex[2:4], color_hex[4:6]
+                ass_color = f"&H00{b}{g}{r}&"
+            else:
+                ass_color = "&H00F755A8&"
+
+            start_s = max(0.0, float(o.get("start_seconds", 0.0)))
+            end_s = max(start_s + 0.1, float(o.get("end_seconds", start_s + 5.0)))
+            events.append(f"Dialogue: 0,{format_tc(start_s)},{format_tc(end_s)},TitleStyle,,0,0,0,,{{\\b1}}{text}")
+
+        content = (
+            "[Script Info]\n"
+            "ScriptType: v4.00+\n"
+            "PlayResX: 1920\n"
+            "PlayResY: 1080\n\n"
+            "[V4+ Styles]\n"
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+            "Style: TitleStyle,Arial,60,&H00F755A8,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,3,2,2,20,20,80,1\n\n"
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+            + "\n".join(events) + "\n"
+        )
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
     async def render_edit_cut(
         self,
         video_path: str,
@@ -472,6 +512,7 @@ class LocalMediaProcessingService(BaseMediaProcessingService):
         output_cut_path: str,
         target_resolution: str = "1080p",
         include_audio: bool = True,
+        text_overlays: list[dict[str, Any]] | None = None,
     ) -> RenderCutResult:
         """Trim and concatenate segments into a high-quality H.264 MP4 export cut."""
         if not self.ffmpeg_path:
@@ -505,11 +546,25 @@ class LocalMediaProcessingService(BaseMediaProcessingService):
                 concat_inputs.append(f"[v{i}]")
 
         a_flag = 1 if include_audio else 0
-        filter_str = (
-            "; ".join(filter_parts)
-            + f"; {''.join(concat_inputs)}concat=n={len(segments)}:v=1:a={a_flag}[outv]"
-            + ("[outa]" if include_audio else "")
-        )
+        ass_path: str | None = None
+        if text_overlays:
+            ass_fd, ass_path = tempfile.mkstemp(suffix=".ass")
+            os.close(ass_fd)
+            self._create_ass_file(text_overlays, ass_path)
+
+        if ass_path:
+            sub_filter = f"; [v_concat]subtitles={ass_path}[outv]"
+            concat_str = (
+                f"{''.join(concat_inputs)}concat=n={len(segments)}:v=1:a={a_flag}[v_concat]"
+                + ("[outa]" if include_audio else "")
+            )
+            filter_str = "; ".join(filter_parts) + f"; {concat_str}{sub_filter}"
+        else:
+            filter_str = (
+                "; ".join(filter_parts)
+                + f"; {''.join(concat_inputs)}concat=n={len(segments)}:v=1:a={a_flag}[outv]"
+                + ("[outa]" if include_audio else "")
+            )
 
         cmd = [
             self.ffmpeg_path,
@@ -574,6 +629,12 @@ class LocalMediaProcessingService(BaseMediaProcessingService):
             )
         except Exception as exc:
             return RenderCutResult(success=False, error_message=str(exc))
+        finally:
+            if ass_path and os.path.exists(ass_path):
+                try:
+                    os.unlink(ass_path)
+                except Exception:
+                    pass
 
     async def analyze_audio_beats(self, audio_or_video_path: str) -> AudioBeatsResult:
         """Analyze audio energy, beats/onsets, and tempo without heavy external libraries."""
@@ -748,6 +809,7 @@ class MockMediaProcessingService(BaseMediaProcessingService):
         output_cut_path: str,
         target_resolution: str = "1080p",
         include_audio: bool = True,
+        text_overlays: list[dict[str, Any]] | None = None,
     ) -> RenderCutResult:
         if not self.should_succeed:
             return RenderCutResult(success=False, error_message="Mock render failure")

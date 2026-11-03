@@ -38,6 +38,17 @@ class ExportSegment(BaseModel):
         return self
 
 
+class TextOverlayItem(BaseModel):
+    """Text title overlay burned onto exported video frames."""
+
+    text: str = Field(..., description="Overlay text string")
+    color: str = Field(default="#a855f7", description="Hex color e.g. #a855f7")
+    start_seconds: float = Field(..., ge=0.0, description="Start timestamp in seconds")
+    end_seconds: float = Field(..., gt=0.0, description="End timestamp in seconds")
+    font_size: int = Field(default=60, description="Font size in points")
+    position: str = Field(default="bottom_center", description="Position: bottom_center or center")
+
+
 class ExportRequest(BaseModel):
     """Request payload to render an edited video cut."""
 
@@ -47,6 +58,9 @@ class ExportRequest(BaseModel):
         min_length=1,
         max_length=50,
         description="List of ordered segments to trim and concatenate",
+    )
+    text_overlays: list[TextOverlayItem] = Field(
+        default_factory=list, description="Optional text title overlays burned onto video"
     )
     resolution: str = Field(
         default="1080p",

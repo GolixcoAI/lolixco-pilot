@@ -11,12 +11,29 @@ interface TimelineProps {
   activeClip: MediaClip | null;
   onSeek: (seconds: number) => void;
   beatTimestamps?: number[];
+  textOverlays?: Array<{
+    id: string;
+    text: string;
+    color: string;
+    start_seconds: number;
+    end_seconds: number;
+    track: string;
+  }>;
+  activeTrim?: {
+    trim_start: number;
+    trim_end: number;
+    source_duration: number;
+    is_active: boolean;
+  } | null;
 }
 
 export function Timeline({
   currentTime,
   duration,
+  activeClip,
   onSeek,
+  textOverlays = [],
+  activeTrim = null,
 }: TimelineProps) {
   const [activeTab, setActiveTab] = useState<
     "timeline" | "scenes" | "aicuts" | "effects" | "color" | "audio" | "captions"
@@ -25,7 +42,7 @@ export function Timeline({
   const [snapping, setSnapping] = useState(true);
   const rulerRef = useRef<HTMLDivElement>(null);
 
-  const totalDuration = duration > 0 ? duration : 30.18;
+  const totalDuration = activeClip && activeClip.duration > 0 ? activeClip.duration : (duration > 0 ? duration : 68.08);
   const playheadPercent = Math.min(100, Math.max(0, (currentTime / totalDuration) * 100));
 
   // SMPTE 30fps timecode formatter: 00:00:12:14
@@ -39,18 +56,26 @@ export function Timeline({
   };
 
   const rulerTicks = useMemo(() => {
-    return [
-      { sec: 0.0, label: "00:00:00:00" },
-      { sec: 4.0, label: "00:00:04:00" },
-      { sec: 8.0, label: "00:00:08:00", marker: "Build-up" },
-      { sec: 12.0, label: "00:00:12:00" },
-      { sec: 16.0, label: "00:00:16:00", marker: "Convergence" },
-      { sec: 20.0, label: "00:00:20:00", marker: "Discharge" },
-      { sec: 24.0, label: "00:00:24:00", marker: "Impact" },
-      { sec: 28.0, label: "00:00:28:00" },
-      { sec: 30.18, label: "00:00:30:18" },
-    ];
-  }, []);
+    const step = totalDuration > 45 ? 10.0 : 5.0;
+    const ticks: Array<{ sec: number; label: string; marker?: string }> = [];
+    for (let s = 0.0; s < totalDuration; s += step) {
+      let marker: string | undefined;
+      if (s === 0.0) marker = "Start";
+      else if (Math.abs(s - 14.0) < 1.0) marker = "Convergence";
+      else if (Math.abs(s - 37.0) < 2.0) marker = "Hollow Purple";
+      ticks.push({
+        sec: s,
+        label: formatSMPTE(s).slice(3, 8),
+        marker,
+      });
+    }
+    ticks.push({
+      sec: totalDuration,
+      label: formatSMPTE(totalDuration).slice(3, 8),
+      marker: "End",
+    });
+    return ticks;
+  }, [totalDuration]);
 
   // Video shots sequence with real thumbnails
   const videoShots = [
@@ -238,29 +263,54 @@ export function Timeline({
             })}
           </div>
 
-          {/* Track 1: V2 Effects Track */}
-          <div className="relative h-11 w-full border-b border-[#1f2433] bg-[#080a0e] p-1">
-            {/* Speed Ramp Block */}
-            <div
-              className="absolute top-1.5 h-8 rounded border border-[#3b82f6]/60 bg-[#1e293b] px-2 flex items-center text-[10px] font-semibold text-[#60a5fa] shadow-sm"
-              style={{
-                left: `${(10.0 / totalDuration) * 100}%`,
-                width: `${(6.0 / totalDuration) * 100}%`,
-              }}
-            >
-              <span className="truncate">Speed Ramp (0.8x → 1.3x)</span>
-            </div>
+          {/* Track 1: V2 Effects & Overlays Track */}
+          <div className="relative h-11 w-full border-b border-[#1f2433] bg-[#080a0e] p-1 overflow-hidden">
+            {/* Real Text Overlays from AI Director */}
+            {textOverlays.map((ov) => {
+              const leftPct = (ov.start_seconds / totalDuration) * 100;
+              const widthPct = Math.max(2, ((ov.end_seconds - ov.start_seconds) / totalDuration) * 100);
+              return (
+                <div
+                  key={ov.id}
+                  className="absolute top-1.5 h-8 rounded border border-[#a855f7] bg-[#a855f7]/25 px-2 flex items-center justify-between text-[10px] font-bold text-[#f3e8ff] shadow-[0_0_12px_rgba(168,85,247,0.5)] z-10"
+                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                >
+                  <span className="flex items-center gap-1.5 truncate">
+                    <span className="rounded bg-[#a855f7] px-1 py-0.2 text-[8px] font-black text-[#000000]">
+                      T
+                    </span>
+                    <span>{ov.text}</span>
+                  </span>
+                  <span className="font-mono text-[9px] text-[#e9d5ff] ml-1 shrink-0">
+                    {formatSMPTE(ov.start_seconds).slice(3, 8)} - {formatSMPTE(ov.end_seconds).slice(3, 8)}
+                  </span>
+                </div>
+              );
+            })}
 
-            {/* Glow / Energy FX Block */}
-            <div
-              className="absolute top-1.5 h-8 rounded border border-[#a855f7]/60 bg-[#2e1065]/70 px-2 flex items-center text-[10px] font-semibold text-[#c084fc] shadow-sm"
-              style={{
-                left: `${(18.0 / totalDuration) * 100}%`,
-                width: `${(8.0 / totalDuration) * 100}%`,
-              }}
-            >
-              <span className="truncate">Glow / Energy FX</span>
-            </div>
+            {/* Default Effect Blocks if no overlays */}
+            {textOverlays.length === 0 && (
+              <>
+                <div
+                  className="absolute top-1.5 h-8 rounded border border-[#3b82f6]/60 bg-[#1e293b] px-2 flex items-center text-[10px] font-semibold text-[#60a5fa] shadow-sm"
+                  style={{
+                    left: `${(10.0 / totalDuration) * 100}%`,
+                    width: `${(6.0 / totalDuration) * 100}%`,
+                  }}
+                >
+                  <span className="truncate">Speed Ramp (0.8x → 1.3x)</span>
+                </div>
+                <div
+                  className="absolute top-1.5 h-8 rounded border border-[#a855f7]/60 bg-[#2e1065]/70 px-2 flex items-center text-[10px] font-semibold text-[#c084fc] shadow-sm"
+                  style={{
+                    left: `${(18.0 / totalDuration) * 100}%`,
+                    width: `${(8.0 / totalDuration) * 100}%`,
+                  }}
+                >
+                  <span className="truncate">Glow / Energy FX</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Track 2: V1 Video Track with Thumbnails & Cuts */}
@@ -315,6 +365,41 @@ export function Timeline({
               />
             </svg>
           </div>
+
+          {/* Active Trim Overlays (e.g. Last 30 Seconds selection) */}
+          {activeTrim?.is_active && (
+            <>
+              {/* Deactivated Region Before In-Point */}
+              <div
+                className="absolute top-0 bottom-0 left-0 bg-[#000000]/75 backdrop-grayscale z-20 border-r-2 border-dashed border-[#ffe600] flex items-center justify-center pointer-events-none"
+                style={{ width: `${(activeTrim.trim_start / totalDuration) * 100}%` }}
+              >
+                <span className="rounded bg-[#08090c] border border-[#374151] px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-wider text-[#9ca3af]">
+                  Deactivated (00:00 - {formatSMPTE(activeTrim.trim_start).slice(3, 8)})
+                </span>
+              </div>
+
+              {/* Active Retained Region Highlight */}
+              <div
+                className="absolute top-0 bottom-0 border-2 border-[#ffe600] z-20 pointer-events-none shadow-[0_0_15px_rgba(255,230,0,0.3)]"
+                style={{
+                  left: `${(activeTrim.trim_start / totalDuration) * 100}%`,
+                  width: `${((activeTrim.trim_end - activeTrim.trim_start) / totalDuration) * 100}%`,
+                }}
+              >
+                <div className="absolute top-1 left-2 rounded bg-[#ffe600] px-1.5 py-0.5 text-[9px] font-black uppercase text-[#000000] shadow-sm">
+                  Active 30.0s Export Selection
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Empty timeline state if no clip loaded */}
+          {!activeClip && (
+            <div className="absolute inset-0 bg-[#08090c]/90 z-20 flex items-center justify-center text-xs font-semibold text-[#64748b]">
+              No active media on timeline. Import footage to begin.
+            </div>
+          )}
 
           {/* Yellow Playhead Needle */}
           <div

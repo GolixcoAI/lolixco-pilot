@@ -96,14 +96,16 @@ async def export_video_cut(
         )
         render_input_path = media.s3_object_key if use_lambda else local_src
 
-        # Convert segment models to dicts
+        # Convert segment and overlay models to dicts
         raw_segments = [s.model_dump() for s in payload.segments]
+        raw_overlays = [o.model_dump() for o in payload.text_overlays]
         res = await media_processor.render_edit_cut(
             video_path=render_input_path,
             segments=raw_segments,
             output_cut_path=local_out,
             target_resolution=payload.resolution,
             include_audio=payload.include_audio,
+            text_overlays=raw_overlays,
         )
 
         if not res.success or not res.output_path or not os.path.exists(res.output_path):
