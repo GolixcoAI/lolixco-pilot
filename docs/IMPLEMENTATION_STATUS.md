@@ -234,3 +234,29 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
 - **Current State:** Localhost acceptance testing 100% complete and verified.
 - **Production Status:** Live EC2 (`http://3.110.25.215`) held unchanged in compliance with local-first directive.
 - **Awaiting Approval:** Halting execution and waiting for user command: `"APPROVED FOR AWS DEPLOYMENT"`.
+
+---
+
+## Milestone 7: Final Release Remediation & Production Verification
+
+### 1. CloudFront Origin Security Hardening
+- **Security Group Ingress:** Attached AWS CloudFront Origin-Facing Managed Prefix List (`pl-9aa247f3`) to `sg-05527b9af5578424f` on port 80.
+- **Public Ingress Revocation:** Revoked `0.0.0.0/0` on port 80 and port 443. Ordinary direct connection attempts to `http://3.110.25.215/` time out at the AWS network layer.
+- **Application Port Isolation:** Ports 3000 and 8000 remain bound strictly to loopback (`127.0.0.1`), fully blocked from public access.
+
+### 2. Operational Facts & Configuration Audit
+- **AWS Secrets Manager:** Secret `lolixcopilot/production/backend` manages all 26 production keys; dynamically read at deployment time via EC2 IAM role (`LolixCopilotAppRole`).
+- **S3 Bucket Hygiene:** Removed legacy unencrypted `releases/app.env` from `s3://lolixcopilot-media-247673029886-ap-south-1`.
+- **Lambda Configuration:** Function `lolixcopilot-media-processor` verified running Python 3.12, 2048 MB memory, 300-second timeout, and 2048 MB ephemeral storage with containerized FFmpeg layer.
+- **Live AI Provider Verification:**
+  - Meta Model API: `https://api.meta.ai/v1` with model `muse-spark-1.3` verified live with HTTP 200.
+  - Baseten: `https://inference.baseten.co/v1` with model `meta-models/muse-spark-open-1026` verified live with HTTP 200.
+  - Modal: GPU execution environment on NVIDIA H100 with persistent volume `lolixcopilot-checkpoints`.
+- **Reasoning Benchmark Context:** Clarified that the 88.5% figure corresponds to the 400-sample Hackathon research suite on short-answer reasoning tasks (Sinan Ozdemir evaluation showing `reasoning_effort="low"` achieves optimal accuracy without intermediate token exhaustion).
+- **Fine-Tuning Transparency:** Explicitly recorded Muse Glimmer 30B QLoRA run on Modal H100 (7 synthetic fixtures, loss 3.086 to 2.142) as pipeline/infrastructure validation rather than a domain expert model. Production uses base Muse Glimmer 30B.
+
+### 3. Verification Suite
+- **Backend Pytest:** 197 passed, 0 failed.
+- **Frontend Vitest:** 30 passed across 4 files.
+- **TypeScript Check:** 0 errors.
+- **Production Frontend Build:** Compiled successfully in 10.5s.

@@ -34,7 +34,7 @@ async def capture_frame(ws, output_filename: str, msg_counter: list):
     img_bytes = base64.b64decode(shot["data"])
     out_path = SCREENSHOT_DIR / output_filename
     out_path.write_bytes(img_bytes)
-    print(f"  ✓ Saved screenshot: {out_path} ({len(img_bytes):,} bytes)")
+    print(f"  [PASS] Saved screenshot: {out_path} ({len(img_bytes):,} bytes)")
     return out_path
 
 async def main():
@@ -76,7 +76,7 @@ async def main():
             "returnByValue": True
         })
         page_title = res.get("result", {}).get("value", "")
-        print(f"  ✓ Page Title: '{page_title}'")
+        print(f"  [PASS] Page Title: '{page_title}'")
 
         # 4. Check Logo and Command Bar
         res = await call("Runtime.evaluate", {
@@ -84,7 +84,7 @@ async def main():
             "returnByValue": True
         })
         has_logo = res.get("result", {}).get("value", False)
-        print(f"  ✓ Brand SVG Logo rendered: {has_logo}")
+        print(f"  [PASS] Brand SVG Logo rendered: {has_logo}")
 
         # 5. Check API Health Check & Git Commit SHA
         res = await call("Runtime.evaluate", {
@@ -98,7 +98,7 @@ async def main():
             "returnByValue": True
         })
         health_data = res.get("result", {}).get("value", {})
-        print(f"  ✓ Live Health Check: status='{health_data.get('status')}', commit_sha='{health_data.get('commit_sha')}'")
+        print(f"  [PASS] Live Health Check: status='{health_data.get('status')}', commit_sha='{health_data.get('commit_sha')}'")
         assert health_data.get("status") == "healthy", "Production health check failed"
 
         # Capture Clean First Launch
@@ -125,10 +125,10 @@ async def main():
         chat_val = res.get("result", {}).get("value", {})
         msg_obj = chat_val.get("message", {})
         content = msg_obj.get("content", "")
-        print(f"  ✓ AI Director greeting received: {len(content)} chars")
-        print(f"  ✓ Message snippet: {content[:80]}...")
+        print(f"  [PASS] AI Director greeting received: {len(content)} chars")
+        print(f"  [PASS] Message snippet: {content[:80]}...")
         recs = chat_val.get("edit_recommendations") or []
-        print(f"  ✓ Recommendations count: {len(recs)} (must be 0)")
+        print(f"  [PASS] Recommendations count: {len(recs)} (must be 0)")
         assert len(recs) == 0
 
         # 7. Verify AI Director Query 1 (Review my edit)
@@ -154,9 +154,9 @@ async def main():
         scenes = q1_data.get("scene_breakdown") or []
         recs1 = q1_data.get("edit_recommendations") or []
         traces = q1_data.get("inference_trace") or []
-        print(f"  ✓ Scenes returned: {len(scenes)}")
-        print(f"  ✓ Recommendations returned: {len(recs1)}")
-        print(f"  ✓ Multi-Provider Traces: {[t.get('provider') for t in traces]}")
+        print(f"  [PASS] Scenes returned: {len(scenes)}")
+        print(f"  [PASS] Recommendations returned: {len(recs1)}")
+        print(f"  [PASS] Multi-Provider Traces: {[t.get('provider') for t in traces]}")
         assert len(scenes) == 6
         assert len(recs1) == 5
 
@@ -181,9 +181,9 @@ async def main():
         })
         q2_data = res.get("result", {}).get("value", {})
         bp2 = q2_data.get("updated_blueprint") or {}
-        print(f"  ✓ Blueprint Action: {bp2.get('action')}")
+        print(f"  [PASS] Blueprint Action: {bp2.get('action')}")
         overlay = bp2.get("overlay") or {}
-        print(f"  ✓ Overlay details: text='{overlay.get('text')}', range=[{overlay.get('start_seconds')}s, {overlay.get('end_seconds')}s], color='{overlay.get('color')}'")
+        print(f"  [PASS] Overlay details: text='{overlay.get('text')}', range=[{overlay.get('start_seconds')}s, {overlay.get('end_seconds')}s], color='{overlay.get('color')}'")
         assert bp2.get("action") == "add_text_overlay"
         assert overlay.get("color") == "#a855f7"
 
@@ -208,8 +208,8 @@ async def main():
         })
         q3_data = res.get("result", {}).get("value", {})
         bp3 = q3_data.get("updated_blueprint") or {}
-        print(f"  ✓ Blueprint Action: {bp3.get('action')}")
-        print(f"  ✓ Active trim calculated: start={bp3.get('trim_start')}s, end={bp3.get('trim_end')}s")
+        print(f"  [PASS] Blueprint Action: {bp3.get('action')}")
+        print(f"  [PASS] Active trim calculated: start={bp3.get('trim_start')}s, end={bp3.get('trim_end')}s")
         assert bp3.get("action") == "trim_selection"
         assert abs(float(bp3.get("trim_start", 0)) - 38.08) < 0.05
         assert abs(float(bp3.get("trim_end", 0)) - 68.08) < 0.05

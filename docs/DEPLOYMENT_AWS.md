@@ -58,8 +58,8 @@ Production telemetry confirms `t3.small` operates with significant resource head
   - Cache Policy: `Managed-CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`) ensures dynamic API calls and workstation edits are never cached inappropriately.
   - Origin Request Policy: `Managed-AllViewerExceptHostHeader` (`b689b0a8-53d0-40ab-baf2-68738e2966ac`) forwards all authorization headers, cookies, and query strings.
 - **Security Group:** `sg-05527b9af5578424f` (`lolixcopilot-web-sg`)
-  - **Port 80 (HTTP):** Ingress `0.0.0.0/0` (Nginx entry point).
-  - **Port 443 (HTTPS):** Ingress `0.0.0.0/0`.
+  - **Port 80 (HTTP):** Ingress restricted exclusively to AWS CloudFront Origin-Facing Managed Prefix List (`pl-9aa247f3`). Direct public ingress `0.0.0.0/0` is revoked; direct connection attempts to the EC2 IP time out.
+  - **Port 443 (HTTPS):** Ingress revoked (CloudFront terminates TLS 1.3 at the edge; EC2 origin communication uses port 80 over the AWS backbone).
   - **Port 3000 (Next.js):** **Revoked / Closed to Internet** (bound to loopback `127.0.0.1:3000`).
   - **Port 8000 (FastAPI):** **Revoked / Closed to Internet** (bound to loopback `127.0.0.1:8000`).
   - **Port 22 (SSH):** **Closed**. Instance administration is performed via AWS Systems Manager Session Manager.
@@ -93,8 +93,8 @@ LolixCopilot eliminates plaintext credential storage in Git, deployment packages
 
 ### 4.2 AWS Lambda Media Processor
 - **Function Name:** `lolixcopilot-media-processor`
-- **Runtime:** Python 3.12 with custom FFmpeg / ffprobe layer.
-- **Memory & Timeout:** 1024 MB RAM, 120-second timeout.
+- **Runtime:** Python 3.12 with containerized FFmpeg / ffprobe layer (`zip` package).
+- **Memory & Timeout:** 2048 MB RAM, 300-second timeout, 2048 MB ephemeral storage.
 - **Responsibilities:**
   - Video container inspection and metadata extraction.
   - H.264 / AAC 720p proxy generation for browser playback.

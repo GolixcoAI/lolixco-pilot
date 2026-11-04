@@ -374,7 +374,7 @@ LolixCopilot is deployed in AWS Region `ap-south-1` (Mumbai):
 - **CloudFront HTTPS URL:** `https://d2ikihwmt96m58.cloudfront.net`
 - **Origin Server:** `ec2-3-110-25-215.ap-south-1.compute.amazonaws.com` (`t3.small`)
 - **Automated Secrets Ingestion:** Backend loads credentials dynamically from AWS Secrets Manager (`lolixcopilot/production/backend`) via EC2 IAM instance profile.
-- **Port Isolation:** Security group `sg-05527b9af5578424f` restricts public ingress to ports 80 and 443; ports 3000 and 8000 are closed to the internet.
+- **Origin Isolation & Ingress Hardening:** Security group `sg-05527b9af5578424f` restricts port 80 ingress exclusively to the AWS CloudFront Origin-Facing Managed Prefix List (`pl-9aa247f3`). Direct public ingress `0.0.0.0/0` on ports 80 and 443 is revoked; ports 3000 and 8000 are bound strictly to localhost loopback.
 - **Administration:** AWS Systems Manager Session Manager (no open SSH port 22).
 
 Refer to [docs/DEPLOYMENT_AWS.md](docs/DEPLOYMENT_AWS.md) for operational instructions.

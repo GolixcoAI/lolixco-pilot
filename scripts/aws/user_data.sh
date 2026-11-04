@@ -31,16 +31,37 @@ apt-get install -y nodejs
 mkdir -p /opt/lolixcopilot
 cd /opt/lolixcopilot
 
-# 4. Fetch release package and env from private S3 using instance IAM credentials
+# 4. Fetch release package and unpack
 aws s3 cp s3://lolixcopilot-media-247673029886-ap-south-1/releases/release.tar.gz /tmp/release.tar.gz --region ap-south-1
 tar -xzf /tmp/release.tar.gz -C /opt/lolixcopilot
-aws s3 cp s3://lolixcopilot-media-247673029886-ap-south-1/releases/app.env /opt/lolixcopilot/.env --region ap-south-1
-cp /opt/lolixcopilot/.env /opt/lolixcopilot/backend/.env
-cp /opt/lolixcopilot/.env /opt/lolixcopilot/frontend/.env.production
+rm -f /tmp/release.tar.gz
 
-# 5. Set up Python backend
+# 5. Set up Python backend and hydrate secrets from AWS Secrets Manager
 python3 -m venv /opt/lolixcopilot/.venv
 /opt/lolixcopilot/.venv/bin/pip install --upgrade pip
+/opt/lolixcopilot/.venv/bin/pip install boto3
+/opt/lolixcopilot/.venv/bin/python3 - << 'PYEOF'
+import boto3, json, os
+
+client = boto3.client('secretsmanager', region_name='ap-south-1')
+resp = client.get_secret_value(SecretId='lolixcopilot/production/backend')
+data = json.loads(resp['SecretString'])
+
+commit_sha = 'unknown'
+try:
+    with open('/opt/lolixcopilot/RELEASE_METADATA.json') as f:
+        commit_sha = json.load(f).get('commit_sha', 'unknown')
+except Exception:
+    pass
+
+with open('/opt/lolixcopilot/.env', 'w') as f:
+    for k, v in data.items():
+        if k not in ['MODAL_TOKEN_ID', 'MODAL_TOKEN_SECRET']:
+            f.write(f'{k}={v}\n')
+    f.write(f'GIT_COMMIT_SHA={commit_sha}\n')
+os.chmod('/opt/lolixcopilot/.env', 0o600)
+PYEOF
+
 /opt/lolixcopilot/.venv/bin/pip install -e /opt/lolixcopilot/backend
 
 # 6. Set up Node.js frontend

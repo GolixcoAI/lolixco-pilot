@@ -43,6 +43,7 @@ All database tables in Supabase PostgreSQL enforce Row-Level Security:
 ## 4. Network and Host Hardening
 
 - **Loopback Binding:** Both Next.js (`127.0.0.1:3000`) and FastAPI (`127.0.0.1:8000`) listen exclusively on loopback interfaces.
-- **Closed Ingress:** Inbound firewall rules for ports 3000 and 8000 are revoked from the AWS Security Group. All public traffic enters through port 80/443 via Nginx.
+- **Origin Isolation via Managed Prefix List:** Port 80 ingress on the AWS Security Group (`sg-05527b9af5578424f`) is restricted exclusively to the AWS CloudFront Origin-Facing Managed Prefix List (`pl-9aa247f3`). Direct public ingress `0.0.0.0/0` on ports 80 and 443 is revoked; attempts to access the EC2 IP directly time out.
+- **Closed Application Ingress:** Inbound firewall rules for ports 3000 and 8000 are revoked. Application services listen exclusively on loopback interfaces (`127.0.0.1:3000` and `127.0.0.1:8000`).
 - **Edge HTTPS:** CloudFront provides TLS 1.3 encryption with automatic HTTP-to-HTTPS redirection.
 - **No Open SSH Port:** Administrative access to the EC2 host is restricted to AWS Systems Manager Session Manager, eliminating public SSH exposure on port 22.

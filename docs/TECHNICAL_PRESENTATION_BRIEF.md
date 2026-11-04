@@ -102,10 +102,11 @@ LolixCopilot runs in AWS Region `ap-south-1` (Mumbai):
 
 - **EC2 Workstation Host:** Single `t3.small` instance (2 vCPUs, 2GB RAM, 2GB swap, 30GB gp3 SSD). Sizing telemetry proves it runs efficiently with 1.1GB RAM free and negligible CPU load.
 - **Edge HTTPS:** Amazon CloudFront distribution (`d2ikihwmt96m58.cloudfront.net`) providing global SSL/TLS encryption and automatic HTTP-to-HTTPS redirect.
-- **Nginx Reverse Proxy:** Terminates internal HTTP traffic on port 80/443 and proxies to Next.js (`127.0.0.1:3000`) and FastAPI (`127.0.0.1:8000`). Public access to ports 3000 and 8000 is completely blocked in the security group.
-- **AWS Secrets Manager:** Automatically provisions backend credentials (`lolixcopilot/production/backend`) and injects them at service startup using the EC2 IAM instance role (`LolixCopilotAppRole`). No static AWS keys or API tokens exist on disk or in Git.
-- **Private S3 Storage:** Dedicated private bucket (`s3://lolixcopilot-media-247673029886-ap-south-1`) with Public Access Block enabled. Uploads and streaming use 15-minute presigned URLs. Objects automatically expire after 7 days.
-- **AWS Lambda:** Serverless Python 3.12 + FFmpeg function (`lolixcopilot-media-processor`) generates 720p proxies, extracts beat waveforms, and renders final exported MP4 cuts.
+- **Origin Isolation via Managed Prefix List:** Port 80 ingress on EC2 security group `sg-05527b9af5578424f` is restricted exclusively to AWS CloudFront Origin-Facing Managed Prefix List (`pl-9aa247f3`). Direct public ingress on ports 80 and 443 is revoked; direct connections to the EC2 IP time out. Application ports 3000 and 8000 are private to loopback.
+- **Nginx Reverse Proxy:** Reverse proxies internal edge traffic on port 80 to Next.js (`127.0.0.1:3000`) and FastAPI (`127.0.0.1:8000`).
+- **AWS Secrets Manager:** Securely stores all backend configuration keys (`lolixcopilot/production/backend`), dynamically read during deployment using the EC2 IAM role (`LolixCopilotAppRole`). No secrets are committed to Git.
+- **Private S3 Storage:** Dedicated private bucket (`s3://lolixcopilot-media-247673029886-ap-south-1`) with Public Access Block enabled. Uploads and streaming use 15-minute presigned URLs. Objects automatically expire after 7 days (`ExpireUserFootageAfter7Days`).
+- **AWS Lambda:** Serverless Python 3.12 + FFmpeg function (`lolixcopilot-media-processor`, 2048 MB RAM, 300s timeout) generates 720p proxies, extracts beat waveforms, and renders final exported MP4 cuts.
 - **Host Administration:** AWS Systems Manager Session Manager (no open SSH port 22).
 
 ---

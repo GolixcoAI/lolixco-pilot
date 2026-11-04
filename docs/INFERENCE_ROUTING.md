@@ -69,6 +69,14 @@ When a user interacts with the AI Director, the request can either target a spec
    - The backend validates the synthesized blueprint against `backend/app/models/blueprint.py`.
    - The validated blueprint is delivered to the frontend, updating the AI Director chat, scene cards, and timeline tracks simultaneously.
 
+## Query-Specific Execution Paths
+
+Not every request invokes all three providers. Auto Mode optimizes latency and resource usage based on the nature of the request:
+
+- **Comprehensive Editorial Review (e.g., 'Review my edit'):** Executes the full multi-model ensemble (Modal for visual frame grounding, Meta Muse Spark for director narrative reasoning, Baseten for structured edit refinement).
+- **Targeted Creative Operations (e.g., 'Add title overlay for Hollow Purple', 'Keep last 30 seconds'):** Directly executes intent confirmation and deterministic timeline mutations (`add_text_overlay`, `trim_selection`) without running redundant heavy visual models.
+- **Conversational Greetings (e.g., 'Hi', 'Who are you'):** Handled conversationally by Meta Muse Spark without triggering timeline mutations or multi-provider coordination.
+
 ## Resilience and Fallback Mechanisms
 
 If a provider encounters an outage, rate limit, or network timeout, the orchestrator executes deterministic fallback procedures:
