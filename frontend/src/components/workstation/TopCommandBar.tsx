@@ -27,6 +27,7 @@ export function TopCommandBar({
 }: TopCommandBarProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [healthStatus, setHealthStatus] = useState<"healthy" | "connecting" | "offline">("connecting");
+  const [commitSha, setCommitSha] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const config = getFrontendConfig();
@@ -37,7 +38,15 @@ export function TopCommandBar({
       try {
         const res = await fetch(`${config.apiBaseUrl}/api/health`, { cache: "no-store" });
         if (active) {
-          setHealthStatus(res.ok ? "healthy" : "offline");
+          if (res.ok) {
+            setHealthStatus("healthy");
+            const data = await res.json().catch(() => null);
+            if (data?.commit_sha) {
+              setCommitSha(data.commit_sha.slice(0, 7));
+            }
+          } else {
+            setHealthStatus("offline");
+          }
         }
       } catch {
         if (active) setHealthStatus("offline");
@@ -116,6 +125,15 @@ export function TopCommandBar({
           </span>
           <span className="text-[#64748b]">Saved just now</span>
         </div>
+
+        {commitSha && (
+          <span
+            title={`Deployed Release Commit: ${commitSha}`}
+            className="rounded border border-[#1f2433] bg-[#11141e] px-1.5 py-0.5 font-mono text-[10px] text-[#64748b]"
+          >
+            {commitSha}
+          </span>
+        )}
 
         {onNewProject && (
           <button

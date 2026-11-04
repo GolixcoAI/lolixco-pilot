@@ -21,7 +21,7 @@
 
 ---
 
-## 🎯 Verification of All 9 User Requirements
+## Verification of All 9 User Requirements
 
 1. **Inspect Git status, unfinished changes, failed tests:**
    - Completed. Unfinished export handling, media ID resolution, and Supabase repo UUID checks resolved. All tests passing.
@@ -44,7 +44,7 @@
 
 ---
 
-## 📸 Acceptance Verification Artifacts & Screenshots
+## Acceptance Verification Artifacts & Screenshots
 
 All screenshots and frame proofs are generated at 1920×1080 resolution and stored in `docs/verification_screenshots/`:
 1. `01_clean_first_launch.png`: Clean workstation state on launch with empty media bin, empty timeline, and clean AI Director.
@@ -80,7 +80,7 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
 
 ---
 
-## 🎨 Official Brand Logo Integration
+## Official Brand Logo Integration
 
 - **Source Asset:** `docs/logo/LOLIXCOPILOT Futuristic Logo-Photoroom.svg`
 - **Validation:** 118 vector paths spanning X: 216.53 to 2034.47 and Y: 265.12 to 454.52 (emblem + LOLIXCO + PILOT).
@@ -92,7 +92,7 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
 
 ---
 
-## 🖥 Professional Workstation Redesign
+## Professional Workstation Redesign
 
 1. **Top Command Bar:**
    - Official SVG brand logo with dropdown chevron.
@@ -117,7 +117,7 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
    - 4-Option Provider Switcher: `[⚡ Auto]`, `[Modal · Muse Glimmer 30B]`, `[Meta · Muse Spark 1.3]`, `[Baseten · Muse Spark Open 1026]`.
    - Streaming assistant response cards with timestamped reasoning.
    - 6-Scene Breakdown Card with visual thumbnails and instant seek triggers.
-   - 5-Point Checkable Edit Recommendations with `▶ Apply to Timeline` and `🎯 Jump to Moment`.
+   - 5-Point Checkable Edit Recommendations with `▶ Apply to Timeline` and ` Jump to Moment`.
    - Inference Trace card showing genuine provider name, model, latency, and tokens.
    - Prompt suggestions and chat input with file attachment and submit arrow.
 5. **Interactive Multi-Track Timeline:**
@@ -135,7 +135,7 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
 
 ---
 
-## 🤖 Multi-Provider AI Architecture
+## Multi-Provider AI Architecture
 
 1. **Modal (Visual Grounding):**
    - NVIDIA H100 SXM5 80GB HBM3 GPU on Modal persistent volume `lolixcopilot-checkpoints`.
@@ -152,7 +152,7 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
 
 ---
 
-## 🔬 Fine-Tuning Pipeline & Evaluation
+## Fine-Tuning Pipeline & Evaluation
 
 - **Framework:** Axolotl QLoRA with BitsAndBytes 4-bit NF4 quantization.
 - **Dataset:** 7 human-verified multimodal anime event samples with positive events, hard negative distractors, and zero cross-split leakage (`verify_split_leakage` passed).
@@ -161,7 +161,7 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
 
 ---
 
-## 🧪 Test Verification & Definition of Done
+## Test Verification & Definition of Done
 
 - **Backend Pytest Suite:** 196 passed, 0 failed (100% pass rate, 4 new comprehensive tests in `test_three_query_demo.py`).
 - **Frontend Vitest Suite:** 30 passed across 4 test files (100% pass rate).
@@ -171,7 +171,7 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
 
 ---
 
-## 🎬 Milestone 6: Final Three-Query Demo & Localhost Acceptance
+## Milestone 6: Final Three-Query Demo & Localhost Acceptance
 
 ### 1. Localhost Deployment Status
 - **Frontend URL:** [http://localhost:3000](http://localhost:3000) (Next.js Turbopack development server)

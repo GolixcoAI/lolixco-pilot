@@ -39,6 +39,7 @@ training/data/
 *.webp
 !frontend/public/brand/**
 !docs/reference/**
+!docs/screenshots/**
 
 # OS / editor / agent skills
 .DS_Store
