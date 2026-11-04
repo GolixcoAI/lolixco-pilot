@@ -438,7 +438,7 @@ Refer to [docs/DATASETS_AND_LICENSES.md](docs/DATASETS_AND_LICENSES.md).
 ## 23. Hackathon Context
 
 LolixCopilot was built for the **Meta Global AI Developer Hackathon** (November 2026), hosted by Meta and Cerebral Valley:
-[https://cerebralvalley.ai/e/meta-ai-developer-hackathon/details](https://cerebralvalley.ai/e/meta-ai-developer-hackathon/details).
+[https://cerebralvalley.ai/e/meta-ai-developer-hackathon](https://cerebralvalley.ai/e/meta-ai-developer-hackathon).
 
 The project demonstrates practical, end-to-end integration of Meta's model ecosystem (Muse Spark, Muse Glimmer 30B open weights) paired with partner cloud infrastructure (Modal H100 GPUs, Baseten, AWS).
 
