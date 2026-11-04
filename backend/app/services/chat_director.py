@@ -1089,29 +1089,26 @@ class ChatDirectorService:
                 "help",
             )
         ) and not any(k in prompt for k in ("review", "purple", "last 30", "keep", "retain", "scene", "edit")):
-            content = (
-                "Hello! I am your **LolixCopilot AI Director**.\n\n"
-                "I'm here to help you turn raw footage into a stronger cut:\n"
-                "• **Analyze Footage:** Ask me to review your edit or generate a scene breakdown with pacing suggestions.\n"
-                "• **Locate Key Moments:** Tell me to find climactic actions, characters, or dialogue.\n"
-                "• **Automate Edits:** Add title overlays, pace transitions, or trim specific segments for export.\n\n"
-                "Import your footage into the Media Bin or ask me any question to get started!"
+            greeting_prompt = (
+                f"The user says: '{raw_prompt}'. Greet them warmly as the LolixCopilot AI Director. "
+                "Briefly describe your core capabilities: video analysis, scene breakdown, pacing optimization, "
+                "identifying climax moments, adding titles, and trimming for export. Keep your response concise, helpful, and professional."
             )
+            meta_content, meta_trace = self._call_meta_live(
+                greeting_prompt,
+                project_id=project_id,
+                system_prompt=(
+                    "You are LolixCopilot AI Director, an intelligent video editing assistant. "
+                    "Respond warmly and professionally to creator greetings and inquiries. Keep answers punchy and focused on video editing."
+                ),
+            )
+            traces.append(meta_trace)
+            content = meta_content
             timecode_jump = None
             action = None
             cards = []
             scene_breakdown = []
             edit_recs = []
-            traces.append(
-                InferenceTraceItem(
-                    provider="meta",
-                    model="muse-spark-1.3",
-                    task="conversational_intent",
-                    status="success",
-                    latency_ms=12.0,
-                    cost_usd=0.00002,
-                )
-            )
 
         # 12. General fallback assistant
         else:

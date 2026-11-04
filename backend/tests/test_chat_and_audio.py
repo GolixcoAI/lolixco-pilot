@@ -118,9 +118,13 @@ def test_chat_director_service_direct_queries() -> None:
     for greeting_text in ("Hi", "Hello", "Hey", "Hi there!", "Good morning", "yo"):
         req_greet = ChatRequest(message=greeting_text)
         res_greet = service.process_chat_message(req_greet, media_data=media_data)
-        assert "LolixCopilot AI Director" in res_greet.message.content
+        assert "lolixcopilot" in res_greet.message.content.lower()
+        assert "director" in res_greet.message.content.lower()
         assert res_greet.message.timecode_jump is None
-        assert "Analyze Footage" in res_greet.message.content or "review raw footage" in res_greet.message.content.lower()
+        assert any(
+            phrase in res_greet.message.content.lower()
+            for phrase in ("analyze footage", "video analysis", "review raw footage", "editing", "video")
+        )
 
 
 def test_chat_api_endpoint(client: TestClient, test_repo: InMemoryRepository) -> None:

@@ -138,6 +138,7 @@ PYEOF
         "cd /opt/lolixcopilot",
         "/opt/lolixcopilot/.venv/bin/pip install -e /opt/lolixcopilot/backend",
         "cd /opt/lolixcopilot/frontend",
+        "sed -i 's|^NEXT_PUBLIC_API_BASE_URL=.*|NEXT_PUBLIC_API_BASE_URL=\"\"|g' /opt/lolixcopilot/frontend/.env.local 2>/dev/null || true",
         "export NEXT_PUBLIC_API_BASE_URL=\"\"",
         "export NODE_PATH=/opt/lolixcopilot/frontend/node_modules",
         "unset NODE_ENV",

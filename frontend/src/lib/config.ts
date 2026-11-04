@@ -16,15 +16,23 @@ export function getFrontendConfig(): FrontendConfig {
     !isProduction &&
     process.env.NEXT_PUBLIC_ALLOW_LOCAL_AUTH_FALLBACK === "true";
 
-  // In production or inside browser runtimes, default to empty string so fetch
-  // uses relative paths (/api/...) on the current domain without Mixed Content errors.
+  // In production or inside HTTPS browser runtimes, always default to relative paths ("")
+  // so requests route through CloudFront and Nginx without Mixed Content or localhost connection errors.
+  const isBrowser = typeof window !== "undefined";
+  const isHttps = isBrowser && window.location.protocol === "https:";
   const rawApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  const apiBaseUrl =
-    rawApiBase !== undefined && rawApiBase !== ""
-      ? rawApiBase
-      : isProduction
-        ? ""
-        : "http://localhost:8000";
+
+  let apiBaseUrl = "";
+  if (isProduction || isHttps) {
+    // Only use rawApiBase if it is an explicit non-localhost absolute URL or relative path
+    if (rawApiBase && !rawApiBase.includes("localhost") && !rawApiBase.includes("127.0.0.1")) {
+      apiBaseUrl = rawApiBase;
+    } else {
+      apiBaseUrl = "";
+    }
+  } else {
+    apiBaseUrl = rawApiBase || "http://localhost:8000";
+  }
 
   return {
     apiBaseUrl,
