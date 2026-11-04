@@ -18,7 +18,7 @@ An AI-assisted video-editing workstation that understands footage, finds importa
 [![Supabase](https://img.shields.io/badge/Supabase-Auth%20%26%20Postgres-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-ffe600.svg)](LICENSE)
 
-[**Live Web Application**](https://d2ikihwmt96m58.cloudfront.net) • [**Interactive API Documentation**](https://d2ikihwmt96m58.cloudfront.net/docs) • [**Service Health Status**](https://d2ikihwmt96m58.cloudfront.net/api/health) • [**Technical Documentation Index**](docs/README.md)
+[**Live Web Application**](https://d2ikihwmt96m58.cloudfront.net) • [**Interactive API Documentation**](https://d2ikihwmt96m58.cloudfront.net/docs) • [**Service Health Status**](https://d2ikihwmt96m58.cloudfront.net/api/health) • [**Technical Documentation Index**](docs/README.md) • [**YouTube Demo**](https://youtu.be/JYsQ3SmmltA)
 
 </div>
 
@@ -62,7 +62,7 @@ Unlike generative AI video tools that synthesize artificial video clips from tex
 
 ---
 
-## 2. Product Screenshots and Demonstration Video
+## 2. Product Screenshot and Demo
 
 ### Clean Workstation Interface
 
@@ -73,19 +73,6 @@ The LolixCopilot workstation adheres to a premium dark studio aesthetic (`#08090
 </div>
 
 *Figure 1: The LolixCopilot workstation on initial launch, displaying the top command bar, media bin, 60fps preview monitor with SMPTE timecode display, multi-track timeline (V2/V1/A1), and conversational AI Director panel.*
-
-### Demonstration Walkthrough
-
-A structured 3-minute product walkthrough demonstrates:
-1. Secure, direct-to-S3 media ingestion with automatic proxy generation.
-2. Synchronized 60fps playback with zero audio drift.
-3. Conversational editorial review producing structured scene cards and checkable recommendations.
-4. Grounded temporal discovery locating key character actions with sub-second accuracy.
-5. One-click timed title overlay placement on Track V2.
-6. Non-destructive last-30-seconds trimming with automatic overlay remapping.
-7. Asynchronous AWS Lambda FFmpeg export rendering with burned subtitle overlays.
-
-Refer to the complete narration script in [docs/YOUTUBE_DEMO_SCRIPT.md](docs/YOUTUBE_DEMO_SCRIPT.md).
 
 ---
 
