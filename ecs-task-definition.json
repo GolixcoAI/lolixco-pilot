@@ -1,0 +1,58 @@
+{
+  "family": "lolixcopilot-workstation",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::247673029886:role/LolixCopilotAppRole",
+  "taskRoleArn": "arn:aws:iam::247673029886:role/LolixCopilotAppRole",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "247673029886.dkr.ecr.ap-south-1.amazonaws.com/lolixcopilot-backend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "APP_ENV", "value": "production"},
+        {"name": "AWS_REGION", "value": "ap-south-1"},
+        {"name": "AWS_S3_BUCKET", "value": "lolixcopilot-media-247673029886-ap-south-1"},
+        {"name": "AI_PROVIDER", "value": "auto"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/lolixcopilot",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "backend"
+        }
+      }
+    },
+    {
+      "name": "frontend",
+      "image": "247673029886.dkr.ecr.ap-south-1.amazonaws.com/lolixcopilot-frontend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "NODE_ENV", "value": "production"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/lolixcopilot",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "frontend"
+        }
+      }
+    }
+  ]
+}

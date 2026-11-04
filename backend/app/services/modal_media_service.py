@@ -13,10 +13,12 @@ import logging
 from typing import Any
 
 from app.services.media_processing import (
+    AudioBeatsResult,
     AudioExtractionResult,
     BaseMediaProcessingService,
     LocalMediaProcessingService,
     MediaProbeResult,
+    RenderCutResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,3 +159,40 @@ class ModalMediaProcessingService(BaseMediaProcessingService):
                 logger.warning("Modal frame extraction failed: %s", exc)
 
         return []
+
+    async def generate_h264_proxy(
+        self,
+        video_path: str,
+        output_proxy_path: str,
+        max_width: int = 1280,
+    ) -> bool:
+        """Generate compatible H.264 preview proxy via local fallback."""
+        return await self.fallback.generate_h264_proxy(
+            video_path=video_path,
+            output_proxy_path=output_proxy_path,
+            max_width=max_width,
+        )
+
+    async def render_edit_cut(
+        self,
+        video_path: str,
+        segments: list[dict[str, Any]],
+        output_cut_path: str,
+        target_resolution: str = "1080p",
+        include_audio: bool = True,
+    ) -> RenderCutResult:
+        """Render multi-segment edit cut via local fallback."""
+        return await self.fallback.render_edit_cut(
+            video_path=video_path,
+            segments=segments,
+            output_cut_path=output_cut_path,
+            target_resolution=target_resolution,
+            include_audio=include_audio,
+        )
+
+    async def analyze_audio_beats(
+        self,
+        audio_or_video_path: str,
+    ) -> AudioBeatsResult:
+        """Analyze audio beats and energy profile via local fallback."""
+        return await self.fallback.analyze_audio_beats(audio_or_video_path=audio_or_video_path)

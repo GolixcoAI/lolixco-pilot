@@ -255,7 +255,7 @@ Following empirical research and official Baseten documentation:
 
 2. **Reasoning Effort & Token Budgeting:**
    - In accordance with empirical benchmark findings ([`MUSE_EXPERIMENTS_NOTES.md`](file:///home/vuld0/LolixCopilot/docs/research/MUSE_EXPERIMENTS_NOTES.md)):
-     - Muse Spark Open peaks at `reasoning_effort="low"` (88.5% pass@1).
+     - Muse Spark Open peaks at `reasoning_effort="low"` in empirical short-answer reasoning benchmarks (88.5% accuracy across 400 samples in the published Hackathon Muse evaluation suite, avoiding output token exhaustion).
      - Muse rejects `reasoning_effort="none"`.
      - High reasoning effort (`high`, `xhigh`, `max`) causes token exhaustion and truncation (19 of 400 answers truncated at `max` in benchmarks).
    - LolixCopilot maintains `max_tokens=2500` and `temperature=0.2` to ensure intermediate chain-of-thought does not truncate the final `EditingBlueprint` JSON object.

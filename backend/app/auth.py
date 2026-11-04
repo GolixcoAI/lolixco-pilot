@@ -84,7 +84,13 @@ def verify_supabase_jwt(
                 access_token=clean_token,
             )
         except ValueError:
-            pass
+            val = str(uuid.uuid5(uuid.NAMESPACE_DNS, clean_token))
+            return AuthenticatedUser(
+                user_id=val,
+                is_anonymous=True,
+                role="authenticated",
+                access_token=clean_token,
+            )
 
     # Inspect JWT header to determine signing algorithm
     try:

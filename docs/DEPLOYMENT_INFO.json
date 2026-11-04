@@ -1,0 +1,10 @@
+{
+  "instance_id": "i-06401964b15024c7e",
+  "region": "ap-south-1",
+  "public_ip": "3.110.25.215",
+  "public_dns": "ec2-3-110-25-215.ap-south-1.compute.amazonaws.com",
+  "app_url": "http://3.110.25.215",
+  "api_docs_url": "http://3.110.25.215/docs",
+  "api_health_url": "http://3.110.25.215/api/v1/health",
+  "launched_at": "2026-11-03T07:57:04Z"
+}

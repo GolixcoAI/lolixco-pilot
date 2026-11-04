@@ -75,11 +75,11 @@ The workstation is laid out as a professional docked application:
 | A  | +------------------+ |                                                  |                          |
 | V  | | clip1    | clip2 | |                                                  | ✦ KEY MOMENTS (4)        |
 |    | | [thumb]  | [thb] | +--------------------------------------------------+ | 1. 00:04.2 [HOOK] [Jump] |
-| R  | +------------------+ | 00:18:24 / 00:32:16  |◀  ▶  ▶|  🔊 [---]  ⛶       | 2. 00:11.8 [BUILD][Jump] |
+| R  | +------------------+ | 00:18:24 / 00:32:16  |◀  ▶  ▶|  VOL [---]  [ ]      | 2. 00:11.8 [BUILD][Jump] |
 | A  | | clip3    | aud1  | +--------------------------------------------------+ | 3. 00:18.4 [CLIMAX][Jmp] |
 | I  | | [thumb]  | [wav] | TIMELINE TOOLBAR (Undo, Redo, Split, Snap, Zoom)   | 4. 00:24.6 [RESOLVE][Jmp]|
 | L  | +------------------+ |--------------------------------------------------+                          |
-|    |                      | Ruler: 00:00   00:05   00:10   00:15   00:20...  | 💡 AI Suggestions        |
+|    |                      | Ruler: 00:00   00:05   00:10   00:15   00:20...  | [AI Suggestions]         |
 |    |                      | Playhead Needle (Bright Yellow)                  | ✔ Push-in before 00:04.2 |
 |    |                      | [V2] [Track clips & fx]                          | ✔ Camera shake at climax |
 |    |                      | [V1] [Sequenced cuts with scene thumbnails]      |                          |

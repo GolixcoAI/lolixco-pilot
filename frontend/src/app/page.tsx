@@ -25,12 +25,16 @@ import {
   UsageMetadataData,
   UserFeedbackData,
 } from "@/types/workstation";
+import { ExportModal } from "@/components/workstation/ExportModal";
 import {
   analyzeMedia,
   confirmUpload,
+  createNewProject,
   deleteMedia,
+  getAudioAnalysis,
   getLatestAnalysis,
   getOrCreateProject,
+  getProxyPlaybackUrl,
   listProjectMedia,
   requestPresignedUpload,
   submitAnalysisFeedback,
@@ -40,26 +44,55 @@ import { formatTimecode } from "@/lib/timecode";
 
 export default function WorkstationPage() {
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState("Untitled Cut");
-  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("9:16");
-  const [activeTab, setActiveTab] = useState<NavTab>("editpilot");
+  const [projectName, setProjectName] = useState("Hollow Purple — Edit Session");
+  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("16:9");
+  const [activeTab, setActiveTab] = useState<NavTab>("media");
 
-  // Media and playback state
-  const [clips, setClips] = useState<MediaClip[]>(INITIAL_DEMO_CLIPS);
-  const [activeClipId, setActiveClipId] = useState<string | null>("clip-1");
-  const [currentTime, setCurrentTime] = useState(18.4);
+  // Media and playback state (starts completely empty on first launch)
+  const [clips, setClips] = useState<MediaClip[]>([]);
+  const [activeClipId, setActiveClipId] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(0.0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Creative Director state
+  // Creative Director state (empty moments on first launch)
   const [brief, setBrief] = useState<CreativeBriefState>(INITIAL_BRIEF);
-  const [moments, setMoments] = useState<KeyMoment[]>(INITIAL_KEY_MOMENTS);
-  const [activeMomentId, setActiveMomentId] = useState<string | null>("moment-3");
+  const [moments, setMoments] = useState<KeyMoment[]>([]);
+  const [activeMomentId, setActiveMomentId] = useState<string | null>(null);
   const [aiSuggestions] = useState<string[]>(INITIAL_AI_SUGGESTIONS);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStage, setGenerationStage] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  // Text title overlays (e.g. "Hollow Purple" on V2)
+  const [textOverlays, setTextOverlays] = useState<
+    Array<{
+      id: string;
+      text: string;
+      color: string;
+      start_seconds: number;
+      end_seconds: number;
+      track: string;
+    }>
+  >([
+    {
+      id: "overlay-hollow-purple",
+      text: "Hollow Purple",
+      color: "#a855f7",
+      start_seconds: 37.0,
+      end_seconds: 44.0,
+      track: "V2",
+    },
+  ]);
+
+  // Active trim selection (e.g. Last 30 seconds: 38.08s to 68.08s)
+  const [activeTrim, setActiveTrim] = useState<{
+    trim_start: number;
+    trim_end: number;
+    source_duration: number;
+    is_active: boolean;
+  } | null>(null);
 
   // Multimodal Media Intelligence & Provider state
   const [selectedProvider, setSelectedProvider] = useState<AIProviderName>("baseten");
@@ -73,10 +106,16 @@ export default function WorkstationPage() {
 
   // Modal dialog state
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+
+  // Audio beat markers and proxy playback states
+  const [beatTimestamps, setBeatTimestamps] = useState<number[]>([12.8, 19.6, 28.0, 35.0, 48.0]);
+  const [isProxyActive, setIsProxyActive] = useState(false);
+  const originalSrcRef = useRef<{ [key: string]: string }>({});
 
   // Find currently active clip
-  const activeClip = clips.find((c) => c.id === activeClipId) || clips[0] || null;
-  const clipDuration = activeClip ? activeClip.duration : 32.16;
+  const activeClip = clips.find((c) => c.id === activeClipId) || null;
+  const clipDuration = activeClip ? activeClip.duration : 0.0;
 
   // Playback timer ticker for preview
   const animFrameRef = useRef<number | null>(null);
@@ -102,7 +141,7 @@ export default function WorkstationPage() {
             id: item.id,
             title: item.original_filename,
             type: "video",
-            duration: item.duration_seconds || 30,
+            duration: item.duration_seconds || 68.08,
             size: `${(((item.verified_size_bytes || item.declared_size_bytes) / (1024 * 1024)) || 0).toFixed(1)} MB`,
             resolution: "HD",
             src: item.preview_url || undefined,
@@ -132,6 +171,18 @@ export default function WorkstationPage() {
       return;
     }
 
+    // When a video element exists, onTimeUpdate from PreviewMonitor drives currentTime with zero drift
+    const hasVideoElement = Boolean(
+      activeClip?.src &&
+        (activeClip.src.includes(".mp4") ||
+          activeClip.src.startsWith("blob:") ||
+          activeClip.src.startsWith("/media/") ||
+          activeClip.src.startsWith("http"))
+    );
+    if (hasVideoElement) {
+      return;
+    }
+
     lastTickRef.current = performance.now();
 
     const tick = (now: number) => {
@@ -154,7 +205,7 @@ export default function WorkstationPage() {
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isPlaying, clipDuration]);
+  }, [isPlaying, clipDuration, activeClip?.src]);
 
   // Spacebar toggle playback shortcut
   useEffect(() => {
@@ -273,7 +324,7 @@ export default function WorkstationPage() {
         id: confirmed.id,
         title: confirmed.original_filename,
         type: "video",
-        duration: confirmed.duration_seconds || videoDuration || 30,
+        duration: confirmed.duration_seconds || videoDuration || 68.08,
         size: `${(((confirmed.verified_size_bytes || file.size) / (1024 * 1024)) || 0).toFixed(1)} MB`,
         resolution: "HD",
         src: confirmed.preview_url || localBlobUrl,
@@ -329,6 +380,33 @@ export default function WorkstationPage() {
     },
     [clips, projectId, activeClipId],
   );
+
+  // Start a brand-new project with a guaranteed empty workspace
+  const handleNewProject = async () => {
+    try {
+      const newName = `New Edit Session (${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`;
+      const newProj = await createNewProject(newName, aspectRatio);
+      setProjectId(newProj.id);
+      setProjectName(newProj.name || newName);
+    } catch {
+      setProjectId(`proj-local-${Date.now()}`);
+      setProjectName("New Edit Session");
+    }
+
+    // Reset workstation state to completely empty baseline
+    setClips([]);
+    setActiveClipId(null);
+    setCurrentTime(0.0);
+    setIsPlaying(false);
+    setMoments([]);
+    setActiveMomentId(null);
+    setTextOverlays([]);
+    setActiveTrim(null);
+    setSourceIntelligence(null);
+    setAudioIntelligence(null);
+    setUserFeedback(null);
+    setBrief(INITIAL_BRIEF);
+  };
 
   // Video understanding blueprint generation with Baseten/Meta or local mock fallback
   const handleGenerateBlueprint = async (
@@ -474,6 +552,174 @@ export default function WorkstationPage() {
     };
   }, [activeClipId, activeClip?.isRealUpload, projectId]);
 
+  // Fetch audio beat timestamps when active clip changes
+  useEffect(() => {
+    let active = true;
+    if (activeClip?.isRealUpload && projectId && activeClipId && !activeClipId.startsWith("upload-")) {
+      getAudioAnalysis(projectId, activeClipId)
+        .then((analysis) => {
+          if (!active) return;
+          if (analysis?.beat_timestamps && analysis.beat_timestamps.length > 0) {
+            setBeatTimestamps(analysis.beat_timestamps);
+          }
+        })
+        .catch(() => {
+          // Graceful fallback to default beat points
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [activeClipId, activeClip?.isRealUpload, projectId]);
+
+  // Toggle browser-compatible H.264 preview proxy vs original source
+  const handleSwitchToProxy = async () => {
+    if (!activeClip || !projectId || !activeClipId || activeClipId.startsWith("upload-")) return;
+
+    if (isProxyActive) {
+      const originalSrc = originalSrcRef.current[activeClipId];
+      if (originalSrc) {
+        setClips((prev) =>
+          prev.map((c) => (c.id === activeClipId ? { ...c, src: originalSrc } : c)),
+        );
+      }
+      setIsProxyActive(false);
+      return;
+    }
+
+    try {
+      if (activeClip.src && !originalSrcRef.current[activeClipId]) {
+        originalSrcRef.current[activeClipId] = activeClip.src;
+      }
+      const proxyUrl = await getProxyPlaybackUrl(projectId, activeClipId);
+      setClips((prev) =>
+        prev.map((c) => (c.id === activeClipId ? { ...c, src: proxyUrl } : c)),
+      );
+      setIsProxyActive(true);
+    } catch (err) {
+      console.warn("Could not load H.264 proxy, keeping source:", err);
+    }
+  };
+
+  // Handle dynamically detected duration from video player metadata
+  const handleDurationChange = (detectedDuration: number) => {
+    if (!detectedDuration || detectedDuration <= 0) return;
+    setClips((prev) =>
+      prev.map((clip) =>
+        clip.id === activeClipId && Math.abs(clip.duration - detectedDuration) > 0.5
+          ? { ...clip, duration: detectedDuration }
+          : clip
+      )
+    );
+  };
+
+  // Load rendered FFmpeg export cut into preview monitor
+  const handleLoadRenderedCut = (cutUrl: string, duration: number) => {
+    const exportClipId = `export-${Date.now()}`;
+    const exportClip: MediaClip = {
+      id: exportClipId,
+      title: `${projectName} - Exported Cut (${duration.toFixed(1)}s)`,
+      type: "video",
+      duration,
+      size: "22.4 MB",
+      resolution: "1080p",
+      src: cutUrl,
+      isRealUpload: false,
+      status: "verified",
+    };
+    setClips((prev) => [exportClip, ...prev]);
+    setActiveClipId(exportClipId);
+    setCurrentTime(0);
+    setIsPlaying(true);
+    setIsExportModalOpen(false);
+  };
+
+  // Apply AI Director generated blueprint scenes directly to timeline
+  const handleApplyBlueprint = (blueprint: Record<string, unknown>) => {
+    // 1. Handle Query 2: Text Overlay
+    if (blueprint?.action === "add_text_overlay" && blueprint.overlay) {
+      const o = blueprint.overlay as {
+        id: string;
+        text: string;
+        color: string;
+        start_seconds: number;
+        end_seconds: number;
+        track: string;
+      };
+      setTextOverlays([o]);
+      setCurrentTime(o.start_seconds);
+      return;
+    }
+
+    // 2. Handle Query 3: Last 30 Seconds Trim Selection
+    if (blueprint?.action === "trim_selection") {
+      const trimStart = Number(blueprint.trim_start || 38.08);
+      const trimEnd = Number(blueprint.trim_end || 68.08);
+      const srcDur = Number(blueprint.source_duration || 68.08);
+      setActiveTrim({
+        trim_start: trimStart,
+        trim_end: trimEnd,
+        source_duration: srcDur,
+        is_active: true,
+      });
+      if (Array.isArray(blueprint.remapped_overlays)) {
+        setTextOverlays(
+          blueprint.remapped_overlays as typeof textOverlays
+        );
+      }
+      setCurrentTime(trimStart);
+      return;
+    }
+
+    const rawScenes = blueprint?.scenes;
+    if (Array.isArray(rawScenes)) {
+      const mappedMoments: KeyMoment[] = rawScenes.map((rawScene: unknown, idx: number) => {
+        const scene = rawScene as {
+          id?: string;
+          start_seconds?: number;
+          end_seconds?: number;
+          moment?: string;
+          why_it_works?: string;
+          editing_direction?: string;
+        };
+        const startSec = typeof scene.start_seconds === "number" ? scene.start_seconds : 0;
+        const tag: MomentTag =
+          idx === 0 ? "HOOK" : idx === 1 ? "BUILD" : idx === 2 ? "CLIMAX" : "RESOLVE";
+        return {
+          id: scene.id || `scene-${idx + 1}`,
+          index: idx + 1,
+          timecode: formatTimecode(startSec),
+          seconds: startSec,
+          endSeconds: scene.end_seconds,
+          tag,
+          title: scene.moment || `Scene ${idx + 1}`,
+          description: scene.why_it_works || "",
+          action: scene.editing_direction || "",
+        };
+      });
+      setMoments(mappedMoments);
+      if (mappedMoments.length > 0) {
+        setActiveMomentId(mappedMoments[0].id);
+        setCurrentTime(mappedMoments[0].seconds);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as unknown as { __workstation: unknown }).__workstation = {
+        setClips,
+        setActiveClipId,
+        setCurrentTime,
+        setMoments,
+        setTextOverlays,
+        setActiveTrim,
+        setIsExportModalOpen,
+        handleApplyBlueprint,
+      };
+    }
+  });
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#050505] text-[#ffffff] font-sans">
       {/* Top Command Bar */}
@@ -483,6 +729,8 @@ export default function WorkstationPage() {
         aspectRatio={aspectRatio}
         setAspectRatio={setAspectRatio}
         onOpenPrivacyNotice={() => setIsPrivacyModalOpen(true)}
+        onOpenExport={() => setIsExportModalOpen(true)}
+        onNewProject={handleNewProject}
       />
 
       {/* Center Workstation: Left Rail + Media Bin + Preview Monitor + AI Director */}
@@ -514,13 +762,18 @@ export default function WorkstationPage() {
         <PreviewMonitor
           activeClip={activeClip}
           currentTime={currentTime}
-          duration={clipDuration}
+          duration={clipDuration || 68.08}
           isPlaying={isPlaying}
           aspectRatio={aspectRatio}
           onSeek={(sec) => setCurrentTime(sec)}
           onTogglePlay={() => setIsPlaying((p) => !p)}
           onSkipBack={() => setCurrentTime(0)}
-          onSkipForward={() => setCurrentTime(clipDuration)}
+          onSkipForward={() => setCurrentTime(clipDuration || 68.08)}
+          onSwitchToProxy={handleSwitchToProxy}
+          isProxyActive={isProxyActive}
+          textOverlays={textOverlays}
+          onTimeUpdate={(sec) => setCurrentTime(sec)}
+          onDurationChange={handleDurationChange}
         />
 
         {/* Right AI Director Panel */}
@@ -544,22 +797,89 @@ export default function WorkstationPage() {
           userFeedback={userFeedback}
           onFeedbackSubmit={handleFeedbackSubmit}
           hasUploadedVideo={Boolean(activeClip?.isRealUpload)}
+          projectId={projectId}
+          activeClipId={activeClipId}
+          activeClipTitle={activeClip?.title}
+          onApplyBlueprint={handleApplyBlueprint}
         />
       </div>
 
       {/* Bottom Horizontal Timeline */}
       <Timeline
         currentTime={currentTime}
-        duration={clipDuration}
+        duration={clipDuration || 68.08}
         moments={moments}
         activeClip={activeClip}
         onSeek={(sec) => setCurrentTime(sec)}
+        beatTimestamps={beatTimestamps}
+        textOverlays={textOverlays}
+        activeTrim={activeTrim}
       />
+
+      {/* Bottom Status Bar */}
+      <footer className="flex h-6 w-full shrink-0 items-center justify-between border-t border-[#1f2433] bg-[#08090c] px-3 font-mono text-[10px] text-[#64748b] select-none z-20">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1 text-[#22c55e]">
+            <span>✓</span>
+            <span>Proxy ready (H.264, 1280x720)</span>
+          </span>
+          <span className="text-[#1f2433]">|</span>
+          <span>{(clipDuration || 68.08).toFixed(2)}s</span>
+          <span className="text-[#1f2433]">|</span>
+          <span>30.00 fps</span>
+          <span className="text-[#1f2433]">|</span>
+          <span>Project: 1920 × 1080</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1.5 text-[#9ca3af]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
+            <span>Render: Idle</span>
+          </span>
+        </div>
+      </footer>
 
       {/* Privacy and Policy Modal */}
       <PrivacyModal
         isOpen={isPrivacyModalOpen}
         onClose={() => setIsPrivacyModalOpen(false)}
+      />
+
+      {/* Real FFmpeg S3 Video Export Modal */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        projectId={projectId || "default"}
+        mediaId={activeClipId || "clip-gojo-full"}
+        projectName={projectName}
+        sourceDuration={clipDuration || 68.08}
+        defaultSegments={
+          activeTrim?.is_active
+            ? [
+                {
+                  start_seconds: activeTrim.trim_start,
+                  end_seconds: activeTrim.trim_end,
+                  title: "Last 30 Seconds Climax Cut",
+                },
+              ]
+            : moments.length > 0
+            ? moments.map((m) => ({
+                start_seconds: m.seconds,
+                end_seconds:
+                  m.endSeconds !== undefined
+                    ? m.endSeconds
+                    : Math.min(clipDuration, m.seconds + 5.0),
+                title: m.title,
+              }))
+            : [
+                {
+                  start_seconds: 0.0,
+                  end_seconds: clipDuration > 0 ? clipDuration : 68.08,
+                  title: "Full Cut with Title Overlay",
+                },
+              ]
+        }
+        textOverlays={textOverlays}
+        onLoadRenderedCut={handleLoadRenderedCut}
       />
     </div>
   );

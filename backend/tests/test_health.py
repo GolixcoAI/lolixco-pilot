@@ -13,6 +13,7 @@ def test_api_health_endpoint() -> None:
     assert data["status"] == "healthy"
     assert data["service"] == "lolixco-pilot-api"
     assert "version" in data
+    assert "commit_sha" in data
     assert "timestamp" in data
     assert "environment" in data
 

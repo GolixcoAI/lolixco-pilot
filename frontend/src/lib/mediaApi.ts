@@ -76,6 +76,28 @@ export async function getOrCreateProject(): Promise<ProjectData> {
 }
 
 /**
+ * Explicitly create a new project session with empty workspace.
+ */
+export async function createNewProject(
+  name: string = "Untitled Cut",
+  aspectRatio: string = "16:9",
+): Promise<ProjectData> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${apiBaseUrl}/api/projects`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ name, aspect_ratio: aspectRatio }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to create project: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+/**
  * List all uploaded media assets for a given project.
  */
 export async function listProjectMedia(projectId: string): Promise<MediaItemData[]> {
@@ -252,7 +274,7 @@ export async function analyzeMedia(
     targetDuration: number;
   },
   confirmedConsent: boolean,
-  provider?: "baseten" | "meta" | "mock",
+  provider?: import("@/types/workstation").AIProviderName,
 ): Promise<import("@/types/workstation").AnalysisResponseData> {
   const { apiBaseUrl } = getFrontendConfig();
   const headers = await getAuthHeaders();
@@ -341,3 +363,302 @@ export async function submitAnalysisFeedback(
   return res.json();
 }
 
+/**
+ * Fetch a temporary browser-compatible H.264 preview proxy playback URL.
+ */
+export async function getProxyPlaybackUrl(
+  projectId: string,
+  mediaId: string,
+): Promise<string> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(
+    `${apiBaseUrl}/api/projects/${projectId}/media/${mediaId}/proxy-url`,
+    { headers },
+  );
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch proxy URL (${res.status})`);
+  }
+  const data = await res.json();
+  return data.proxy_url;
+}
+
+export interface ChatDirectorEvidence {
+  timestamp_seconds: number;
+  timecode: string;
+  title: string;
+  description: string;
+  confidence: string;
+  phase: string;
+  thumbnail_url?: string | null;
+}
+
+export interface ChatSceneBreakdown {
+  id: string;
+  start_seconds: number;
+  end_seconds: number;
+  timecode_range: string;
+  title: string;
+  description: string;
+  thumbnail_url: string;
+  editing_direction?: string | null;
+}
+
+export interface ChatEditRecommendation {
+  id: string;
+  text: string;
+  checked: boolean;
+  action_type: string;
+  timestamp_seconds?: number | null;
+}
+
+export interface ChatInferenceTrace {
+  provider: string;
+  model: string;
+  task: string;
+  status: string;
+  latency_ms: number;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  cost_usd?: number | null;
+}
+
+export interface ChatDirectorMessage {
+  id: string;
+  role: "assistant" | "user";
+  content: string;
+  timestamp: string;
+  timecode_jump?: number | null;
+  suggested_action?: string | null;
+  evidence_cards?: ChatDirectorEvidence[];
+  scene_breakdown?: ChatSceneBreakdown[];
+  edit_recommendations?: ChatEditRecommendation[];
+  inference_trace?: ChatInferenceTrace[];
+}
+
+export interface ChatDirectorResponse {
+  message: ChatDirectorMessage;
+  provider_used?: string;
+  model_used?: string;
+  inference_trace?: ChatInferenceTrace[];
+  scene_breakdown?: ChatSceneBreakdown[];
+  edit_recommendations?: ChatEditRecommendation[];
+  updated_blueprint?: Record<string, unknown>;
+}
+
+/**
+ * Send natural creator query to the AI Director assistant.
+ */
+export async function sendChatMessage(
+  projectId: string,
+  message: string,
+  mediaId?: string,
+  provider: string = "auto",
+): Promise<ChatDirectorResponse> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${apiBaseUrl}/api/projects/${projectId}/chat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      message,
+      media_id: mediaId || null,
+      provider: provider || "auto",
+    }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Chat query failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Fetch live AI and cloud infrastructure usage metrics.
+ */
+export async function fetchUsageTelemetry(): Promise<{
+  total_ai_calls: number;
+  estimated_total_cost_usd: number;
+  modal: {
+    calls: number;
+    tokens_prompt: number;
+    tokens_completion: number;
+    total_tokens: number;
+    compute_seconds: number;
+    estimated_cost_usd: number;
+    last_model_used: string | null;
+    last_call_at: string | null;
+  };
+  meta: {
+    calls: number;
+    tokens_prompt: number;
+    tokens_completion: number;
+    total_tokens: number;
+    compute_seconds: number;
+    estimated_cost_usd: number;
+    last_model_used: string | null;
+    last_call_at: string | null;
+  };
+  baseten: {
+    calls: number;
+    tokens_prompt: number;
+    tokens_completion: number;
+    total_tokens: number;
+    compute_seconds: number;
+    estimated_cost_usd: number;
+    last_model_used: string | null;
+    last_call_at: string | null;
+  };
+  lambda_processor: {
+    calls: number;
+    tokens_prompt: number;
+    tokens_completion: number;
+    total_tokens: number;
+    compute_seconds: number;
+    estimated_cost_usd: number;
+    last_model_used: string | null;
+    last_call_at: string | null;
+  };
+  session_started_at: string;
+  last_updated_at: string;
+}> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const res = await fetch(`${apiBaseUrl}/api/v1/telemetry/usage`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Telemetry fetch failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Analyze audio track beats, energy curve, and musical downbeats.
+ */
+export async function getAudioAnalysis(
+  projectId: string,
+  mediaId: string,
+): Promise<{
+  media_id: string;
+  duration_seconds: number;
+  sample_rate: number;
+  peak_dbfs: number;
+  mean_dbfs: number;
+  estimated_bpm: number;
+  beat_timestamps: number[];
+  energy_timeline: Array<{ timestamp: number; normalized_energy: number }>;
+  has_speech: boolean;
+}> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(
+    `${apiBaseUrl}/api/projects/${projectId}/media/${mediaId}/audio-analysis`,
+    { headers },
+  );
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Audio beat analysis failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export interface ExportSegmentRequest {
+  start_seconds: number;
+  end_seconds: number;
+  title?: string;
+  speed_multiplier?: number;
+}
+
+export interface ExportCutResponse {
+  job_id: string;
+  media_id: string;
+  export_object_key: string;
+  download_url: string;
+  duration_seconds: number;
+  file_size_bytes: number;
+  segment_count: number;
+  resolution: string;
+  status: "completed" | "failed";
+  rendered_at: string;
+  expires_in_seconds: number;
+}
+
+export interface ExportTextOverlayRequest {
+  text: string;
+  color?: string;
+  start_seconds: number;
+  end_seconds: number;
+  font_size?: number;
+  position?: string;
+}
+
+/**
+ * Render approved editing blueprint into trimmed, concatenated H.264 MP4 export.
+ */
+export async function renderExportCut(
+  projectId: string,
+  request: {
+    media_id: string;
+    segments: ExportSegmentRequest[];
+    resolution?: "1080p" | "720p" | "source";
+    include_audio?: boolean;
+    text_overlays?: ExportTextOverlayRequest[];
+  },
+): Promise<ExportCutResponse> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${apiBaseUrl}/api/projects/${projectId}/export`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Export cut render failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export interface ExportJobStatusData {
+  export_id: string;
+  project_id: string;
+  media_id: string;
+  status: "processing" | "completed" | "failed";
+  progress: number;
+  message: string;
+  download_url: string;
+  s3_key: string;
+  duration_seconds: number;
+  file_size_bytes: number;
+  segment_count: number;
+  error_message?: string | null;
+}
+
+/**
+ * Poll live status and progress of an active export rendering cut.
+ */
+export async function getExportStatus(
+  projectId: string,
+  exportId: string,
+): Promise<ExportJobStatusData> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${apiBaseUrl}/api/projects/${projectId}/export/${exportId}`, {
+    headers,
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Export status query failed (${res.status})`);
+  }
+  return res.json();
+}

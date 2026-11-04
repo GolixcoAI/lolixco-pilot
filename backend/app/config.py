@@ -38,10 +38,10 @@ class Settings(BaseSettings):
         description="Max video upload size in bytes (default 100 MB, limit 500 MB)",
     )
     MAX_VIDEO_SECONDS: int = Field(
-        default=60,
+        default=120,
         gt=0,
         le=300,
-        description="Max allowed video length in seconds (default 60)",
+        description="Max allowed video length in seconds (default 120 for hackathon demo)",
     )
     SIGNED_URL_TTL_SECONDS: int = Field(
         default=900,
@@ -105,6 +105,14 @@ class Settings(BaseSettings):
     MODAL_MEDIA_WORKER_APP: str = Field(
         default="lolixcopilot-media-worker",
         description="Modal App name for media processing worker",
+    )
+    USE_AWS_LAMBDA_MEDIA_WORKER: bool = Field(
+        default=False,
+        description="Whether to offload media probing, proxy, beats, and cuts to AWS Lambda",
+    )
+    AWS_LAMBDA_MEDIA_FUNCTION: str = Field(
+        default="lolixcopilot-media-processor",
+        description="AWS Lambda function name for serverless media processing",
     )
 
     DATABASE_PROVIDER: str = Field(

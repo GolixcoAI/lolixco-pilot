@@ -1,0 +1,7 @@
+{
+  "commit_sha": "d4d5354528744103c67363a5763c4bc26b226872",
+  "branch": "feat/ai-editor-polish-aws-deploy",
+  "version": "0.1.0",
+  "environment": "production",
+  "deployed_at": "2026-11-04T08:51:43.533624+00:00"
+}
