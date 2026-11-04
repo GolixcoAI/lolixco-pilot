@@ -374,8 +374,8 @@ class SupabaseRepository(BaseRepository):
         if media_id is not None:
             try:
                 payload["id"] = str(uuid.UUID(str(media_id)))
-            except ValueError as exc:
-                raise ValueError(f"media_id must be a valid UUID: {exc}") from exc
+            except ValueError:
+                payload["id"] = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(media_id)))
 
         res = self._request(
             "POST",
@@ -396,7 +396,7 @@ class SupabaseRepository(BaseRepository):
         try:
             clean_media_id = str(uuid.UUID(str(media_id)))
         except ValueError:
-            return None
+            clean_media_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(media_id)))
 
         params = {
             "id": f"eq.{clean_media_id}",
@@ -417,7 +417,7 @@ class SupabaseRepository(BaseRepository):
         try:
             clean_proj_id = str(uuid.UUID(str(project_id)))
         except ValueError:
-            return []
+            clean_proj_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(project_id)))
 
         params = {
             "project_id": f"eq.{clean_proj_id}",
@@ -443,7 +443,7 @@ class SupabaseRepository(BaseRepository):
         try:
             clean_media_id = str(uuid.UUID(str(media_id)))
         except ValueError:
-            return None
+            clean_media_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(media_id)))
 
         payload: dict[str, Any] = {
             "status": status,
@@ -579,7 +579,7 @@ class SupabaseRepository(BaseRepository):
         try:
             clean_media_id = str(uuid.UUID(str(media_id)))
         except ValueError:
-            return None
+            clean_media_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(media_id)))
 
         params = {
             "media_id": f"eq.{clean_media_id}",

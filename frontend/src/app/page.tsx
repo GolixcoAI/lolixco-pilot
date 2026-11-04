@@ -29,6 +29,7 @@ import { ExportModal } from "@/components/workstation/ExportModal";
 import {
   analyzeMedia,
   confirmUpload,
+  createNewProject,
   deleteMedia,
   getAudioAnalysis,
   getLatestAnalysis,
@@ -161,6 +162,18 @@ export default function WorkstationPage() {
       return;
     }
 
+    // When a video element exists, onTimeUpdate from PreviewMonitor drives currentTime with zero drift
+    const hasVideoElement = Boolean(
+      activeClip?.src &&
+        (activeClip.src.includes(".mp4") ||
+          activeClip.src.startsWith("blob:") ||
+          activeClip.src.startsWith("/media/") ||
+          activeClip.src.startsWith("http"))
+    );
+    if (hasVideoElement) {
+      return;
+    }
+
     lastTickRef.current = performance.now();
 
     const tick = (now: number) => {
@@ -183,7 +196,7 @@ export default function WorkstationPage() {
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isPlaying, clipDuration]);
+  }, [isPlaying, clipDuration, activeClip?.src]);
 
   // Spacebar toggle playback shortcut
   useEffect(() => {
@@ -358,6 +371,33 @@ export default function WorkstationPage() {
     },
     [clips, projectId, activeClipId],
   );
+
+  // Start a brand-new project with a guaranteed empty workspace
+  const handleNewProject = async () => {
+    try {
+      const newName = `New Edit Session (${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`;
+      const newProj = await createNewProject(newName, aspectRatio);
+      setProjectId(newProj.id);
+      setProjectName(newProj.name || newName);
+    } catch {
+      setProjectId(`proj-local-${Date.now()}`);
+      setProjectName("New Edit Session");
+    }
+
+    // Reset workstation state to completely empty baseline
+    setClips([]);
+    setActiveClipId(null);
+    setCurrentTime(0.0);
+    setIsPlaying(false);
+    setMoments([]);
+    setActiveMomentId(null);
+    setTextOverlays([]);
+    setActiveTrim(null);
+    setSourceIntelligence(null);
+    setAudioIntelligence(null);
+    setUserFeedback(null);
+    setBrief(INITIAL_BRIEF);
+  };
 
   // Video understanding blueprint generation with Baseten/Meta or local mock fallback
   const handleGenerateBlueprint = async (
@@ -669,6 +709,7 @@ export default function WorkstationPage() {
         setAspectRatio={setAspectRatio}
         onOpenPrivacyNotice={() => setIsPrivacyModalOpen(true)}
         onOpenExport={() => setIsExportModalOpen(true)}
+        onNewProject={handleNewProject}
       />
 
       {/* Center Workstation: Left Rail + Media Bin + Preview Monitor + AI Director */}
@@ -710,6 +751,7 @@ export default function WorkstationPage() {
           onSwitchToProxy={handleSwitchToProxy}
           isProxyActive={isProxyActive}
           textOverlays={textOverlays}
+          onTimeUpdate={(sec) => setCurrentTime(sec)}
         />
 
         {/* Right AI Director Panel */}
@@ -784,8 +826,8 @@ export default function WorkstationPage() {
       <ExportModal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
-        projectId={projectId}
-        mediaId={activeClipId}
+        projectId={projectId || "default"}
+        mediaId={activeClipId || "clip-gojo-full"}
         projectName={projectName}
         defaultSegments={
           activeTrim?.is_active

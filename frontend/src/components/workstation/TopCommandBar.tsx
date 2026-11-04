@@ -12,6 +12,7 @@ interface TopCommandBarProps {
   onOpenPrivacyNotice: () => void;
   onOpenExport?: () => void;
   isExporting?: boolean;
+  onNewProject?: () => void;
 }
 
 export function TopCommandBar({
@@ -22,6 +23,7 @@ export function TopCommandBar({
   onOpenPrivacyNotice,
   onOpenExport,
   isExporting,
+  onNewProject,
 }: TopCommandBarProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [healthStatus, setHealthStatus] = useState<"healthy" | "connecting" | "offline">("connecting");
@@ -114,6 +116,18 @@ export function TopCommandBar({
           </span>
           <span className="text-[#64748b]">Saved just now</span>
         </div>
+
+        {onNewProject && (
+          <button
+            type="button"
+            onClick={onNewProject}
+            title="Create a new empty project session"
+            className="flex items-center gap-1 rounded border border-[#1f2433] bg-[#11141e] px-2 py-0.5 text-[11px] font-semibold text-[#f3f4f6] transition-colors hover:border-[#ffe600]/40 hover:bg-[#161a26]"
+          >
+            <span className="text-[#ffe600] font-bold">+</span>
+            <span>New Project</span>
+          </button>
+        )}
       </div>
 
       {/* Center: Live status notification */}

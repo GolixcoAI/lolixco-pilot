@@ -240,3 +240,63 @@ def test_proxy_playback_url_endpoint(
     assert data["codec"] == "h264"
     assert "proxy_url" in data
     assert "proxies/users/" in data["proxy_url"]
+
+
+def test_export_status_endpoint_workflow(
+    client: TestClient,
+    test_repo: InMemoryRepository,
+    test_storage: MockStorageService,
+) -> None:
+    """Test job-status polling workflow via GET /api/projects/{project_id}/export/{export_id}."""
+    user_id = str(uuid.uuid4())
+    headers = {"Authorization": f"Bearer {user_id}"}
+    project = test_repo.create_project(user_id=user_id, name="Export Status Project")
+
+    media = test_repo.create_media(
+        project_id=project.id,
+        user_id=user_id,
+        original_filename="render_test.mp4",
+        s3_object_key="users/test/render_test.mp4",
+        content_type="video/mp4",
+        declared_size_bytes=4000,
+    )
+    test_repo.update_media_status(
+        media_id=media.id,
+        user_id=user_id,
+        status="verified",
+        duration_seconds=30.0,
+    )
+    test_storage.set_mock_object(media.s3_object_key, size_bytes=4000, exists=True)
+
+    # 1. Trigger export
+    res_export = client.post(
+        f"/api/projects/{project.id}/export",
+        headers=headers,
+        json={
+            "media_id": media.id,
+            "segments": [{"start_seconds": 0.0, "end_seconds": 10.0}],
+            "resolution": "1080p",
+            "include_audio": True,
+        },
+    )
+    assert res_export.status_code == 200
+    export_id = res_export.json()["export_id"]
+
+    # 2. Query export job status
+    res_status = client.get(
+        f"/api/projects/{project.id}/export/{export_id}",
+        headers=headers,
+    )
+    assert res_status.status_code == 200
+    status_data = res_status.json()
+    assert status_data["export_id"] == export_id
+    assert status_data["status"] == "completed"
+    assert status_data["progress"] == 100
+    assert status_data["download_url"] != ""
+
+    # 3. Query non-existent export job
+    res_not_found = client.get(
+        f"/api/projects/{project.id}/export/{uuid.uuid4()}",
+        headers=headers,
+    )
+    assert res_not_found.status_code == 404

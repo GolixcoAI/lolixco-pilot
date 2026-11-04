@@ -140,17 +140,9 @@ export function MediaBin({
           </p>
         </div>
 
-        {/* Upload Progress Card */}
-        {showUploadCard && (
+        {/* Upload Progress Card (Only shown during active upload) */}
+        {isUploading && (
           <div className="relative rounded-md border border-[#1f2433] bg-[#11141e] p-2.5">
-            <button
-              type="button"
-              onClick={() => setShowUploadCard(false)}
-              className="absolute top-2 right-2 text-[#64748b] hover:text-[#f3f4f6]"
-              title="Dismiss"
-            >
-              ✕
-            </button>
             <div className="flex items-center gap-2.5">
               <div className="relative h-10 w-12 shrink-0 overflow-hidden rounded bg-[#000000]">
                 <Image
@@ -162,16 +154,16 @@ export function MediaBin({
               </div>
               <div className="min-w-0 flex-1 pr-4">
                 <p className="truncate text-xs font-semibold text-[#f3f4f6]">
-                  gojo_hollow_purple_edit.mp4
+                  Uploading footage...
                 </p>
                 <p className="text-[10px] text-[#9ca3af]">
-                  {isUploading ? "Uploading... 87% (742 MB / 852 MB)" : "Uploaded · Verified private in S3"}
+                  Processing and verifying with S3
                 </p>
                 {/* Yellow Progress Bar */}
                 <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[#1f2433]">
                   <div
                     className="h-full bg-[#ffe600] transition-all duration-300"
-                    style={{ width: isUploading ? "87%" : "100%" }}
+                    style={{ width: "87%" }}
                   />
                 </div>
               </div>
@@ -223,95 +215,69 @@ export function MediaBin({
           </div>
         </div>
 
-        {/* Media Items List */}
+        {/* Dynamic Media Items List */}
         <div className="space-y-1.5 pt-1">
-          {/* Item 1: Original Footage */}
-          <div
-            onClick={() => {
-              const clip = clips.find((c) => c.id === "clip-1") || clips[0];
-              if (clip) onSelectClip(clip);
-            }}
-            className="group flex cursor-pointer items-center justify-between rounded-md border border-[#1f2433] bg-[#11141e] p-2 transition-colors hover:border-[#ffe600]/40 hover:bg-[#161a26]"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="relative h-9 w-12 shrink-0 overflow-hidden rounded bg-[#000000]">
-                <Image
-                  src="/frames/gojo/frame_00_000.5s.png"
-                  alt="Original Footage"
-                  fill
-                  className="object-cover"
-                />
-                <span className="absolute bottom-0.5 right-0.5 rounded bg-[#000000]/80 px-1 font-mono text-[8px] font-bold text-[#ffffff]">
-                  00:30
-                </span>
+          {filteredClips.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-8 text-center text-[#64748b] space-y-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#141722] border border-[#1f2433] text-sm text-[#9ca3af]">
+                📁
               </div>
-              <div className="min-w-0">
-                <p className="truncate text-xs font-semibold text-[#f3f4f6]">
-                  gojo_hollow_purple_edit.mp4
-                </p>
-                <p className="text-[10px] font-mono text-[#9ca3af]">
-                  1920 × 1080 · 30.18s · H.264
-                </p>
+              <div>
+                <p className="text-xs font-semibold text-[#9ca3af]">No media in bin</p>
+                <p className="mt-0.5 text-[10px] text-[#64748b]">Drop video files above to start</p>
               </div>
             </div>
-            <button type="button" className="text-[#64748b] hover:text-[#f3f4f6] px-1">
-              •••
-            </button>
-          </div>
-
-          {/* Item 2: Proxy Preview */}
-          <div
-            onClick={() => {
-              const clip = clips.find((c) => c.id === "clip-proxy") || clips[0];
-              if (clip) onSelectClip(clip);
-            }}
-            className="group flex cursor-pointer items-center justify-between rounded-md border border-[#1f2433] bg-[#11141e] p-2 transition-colors hover:border-[#ffe600]/40 hover:bg-[#161a26]"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="relative h-9 w-12 shrink-0 overflow-hidden rounded bg-[#000000]">
-                <Image
-                  src="/frames/gojo/frame_08_044.0s.png"
-                  alt="Proxy Preview"
-                  fill
-                  className="object-cover"
-                />
-                <span className="absolute bottom-0.5 right-0.5 rounded bg-[#000000]/80 px-1 font-mono text-[8px] font-bold text-[#ffffff]">
-                  00:30
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-xs font-semibold text-[#f3f4f6]">
-                  proxy_preview.mp4
-                </p>
-                <p className="text-[10px] font-mono text-[#9ca3af]">
-                  1280 × 720 · 30.18s · H.264
-                </p>
-              </div>
-            </div>
-            <button type="button" className="text-[#64748b] hover:text-[#f3f4f6] px-1">
-              •••
-            </button>
-          </div>
-
-          {/* Item 3: Edit Blueprint JSON */}
-          <div className="group flex cursor-pointer items-center justify-between rounded-md border border-[#1f2433] bg-[#11141e] p-2 transition-colors hover:border-[#ffe600]/40 hover:bg-[#161a26]">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-9 w-12 shrink-0 items-center justify-center rounded bg-[#161a26] font-mono text-sm font-bold text-[#ffe600]">
-                {"{ }"}
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-xs font-semibold text-[#f3f4f6]">
-                  edit_plan.json
-                </p>
-                <p className="text-[10px] font-mono text-[#9ca3af]">
-                  2.4 KB · Edit Blueprint
-                </p>
-              </div>
-            </div>
-            <button type="button" className="text-[#64748b] hover:text-[#f3f4f6] px-1">
-              •••
-            </button>
-          </div>
+          ) : (
+            filteredClips.map((clip) => {
+              const isActive = clip.id === activeClipId;
+              return (
+                <div
+                  key={clip.id}
+                  onClick={() => onSelectClip(clip)}
+                  className={`group flex cursor-pointer items-center justify-between rounded-md border p-2 transition-colors ${
+                    isActive
+                      ? "border-[#ffe600] bg-[#1a1f2c]"
+                      : "border-[#1f2433] bg-[#11141e] hover:border-[#ffe600]/40 hover:bg-[#161a26]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="relative h-9 w-12 shrink-0 overflow-hidden rounded bg-[#000000]">
+                      <Image
+                        src="/frames/gojo/frame_00_000.5s.png"
+                        alt={clip.title}
+                        fill
+                        className="object-cover"
+                      />
+                      <span className="absolute bottom-0.5 right-0.5 rounded bg-[#000000]/80 px-1 font-mono text-[8px] font-bold text-[#ffffff]">
+                        {Math.floor(clip.duration)}s
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-[#f3f4f6]">
+                        {clip.title}
+                      </p>
+                      <p className="text-[10px] font-mono text-[#9ca3af]">
+                        {clip.resolution || "1080p"} · {clip.duration.toFixed(1)}s · {clip.size || "Video"}
+                      </p>
+                    </div>
+                  </div>
+                  {onDeleteClip && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteClip(clip.id);
+                      }}
+                      className="text-[#64748b] hover:text-[#ef4444] px-1 text-xs"
+                      title="Delete clip"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>

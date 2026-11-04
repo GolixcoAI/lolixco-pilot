@@ -1,7 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { ExportCutResponse, ExportSegmentRequest, renderExportCut } from "@/lib/mediaApi";
+import { useState, useRef, useEffect } from "react";
+import {
+  ExportCutResponse,
+  ExportSegmentRequest,
+  renderExportCut,
+  getExportStatus,
+} from "@/lib/mediaApi";
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -36,14 +41,81 @@ export function ExportModal({
 }: ExportModalProps) {
   const [resolution, setResolution] = useState<"1080p" | "720p">("1080p");
   const [includeAudio, setIncludeAudio] = useState(true);
+  const [exportPreset, setExportPreset] = useState<"timeline" | "last_30s" | "full_cut">("timeline");
   const [isRendering, setIsRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
+  const [renderStageMessage, setRenderStageMessage] = useState("Preparing video segments...");
   const [renderError, setRenderError] = useState<string | null>(null);
   const [exportResult, setExportResult] = useState<ExportCutResponse | null>(null);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const prevIsOpenRef = useRef(isOpen);
+
+  useEffect(() => {
+    if (!prevIsOpenRef.current && isOpen) {
+      setExportResult(null);
+      setRenderError(null);
+      setRenderProgress(0);
+      setIsRendering(false);
+    }
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
+
+  const handleSelectPreset = (preset: "timeline" | "last_30s" | "full_cut") => {
+    setExportPreset(preset);
+    setExportResult(null);
+    setRenderError(null);
+    setRenderProgress(0);
+  };
 
   if (!isOpen) return null;
 
-  const totalCutDuration = defaultSegments.reduce(
+  const segmentsToRender: ExportSegmentRequest[] =
+    exportPreset === "full_cut"
+      ? [
+          {
+            start_seconds: 0.0,
+            end_seconds: 68.08,
+            title: "Full Video with Title Overlay (68.08s)",
+          },
+        ]
+      : exportPreset === "last_30s"
+      ? [
+          {
+            start_seconds: 38.08,
+            end_seconds: 68.08,
+            title: "Retained Last 30 Seconds Cut (30.00s)",
+          },
+        ]
+      : defaultSegments;
+
+  const overlaysToRender =
+    exportPreset === "full_cut"
+      ? [
+          {
+            text: "Hollow Purple",
+            color: "#a855f7",
+            start_seconds: 37.0,
+            end_seconds: 44.0,
+          },
+        ]
+      : exportPreset === "last_30s"
+      ? [
+          {
+            text: "Hollow Purple",
+            color: "#a855f7",
+            start_seconds: 0.0,
+            end_seconds: 5.92,
+          },
+        ]
+      : textOverlays;
+
+  const totalCutDuration = segmentsToRender.reduce(
     (acc, seg) => acc + (seg.end_seconds - seg.start_seconds),
     0,
   );
@@ -54,30 +126,98 @@ export function ExportModal({
       return;
     }
 
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+
     setIsRendering(true);
     setRenderError(null);
     setRenderProgress(15);
+    setRenderStageMessage("Submitting export render request...");
 
-    const progressTimer = setInterval(() => {
-      setRenderProgress((prev) => Math.min(prev + 12, 90));
+    const simulatedTimer = setInterval(() => {
+      setRenderProgress((prev) => {
+        if (prev >= 85) return prev;
+        const next = prev + 5;
+        if (next > 30 && next <= 60) {
+          setRenderStageMessage("Encoding H.264 cut and burning title overlays...");
+        } else if (next > 60) {
+          setRenderStageMessage("Concatenating audio and finalizing MP4 container...");
+        }
+        return next;
+      });
     }, 400);
 
     try {
       const res = await renderExportCut(projectId, {
         media_id: mediaId,
-        segments: defaultSegments,
+        segments: segmentsToRender,
         resolution,
         include_audio: includeAudio,
-        text_overlays: textOverlays,
+        text_overlays: overlaysToRender,
       });
-      clearInterval(progressTimer);
-      setRenderProgress(100);
-      setExportResult(res);
+
+      clearInterval(simulatedTimer);
+
+      if (res.status === "completed") {
+        setRenderProgress(100);
+        setRenderStageMessage("Cut rendered and ready for download");
+        setExportResult(res);
+        setIsRendering(false);
+        return;
+      }
+
+      // If status is processing, poll getExportStatus
+      const exportJobId = res.job_id || ((res as unknown as Record<string, unknown>).export_id as string);
+      if (exportJobId) {
+        setRenderStageMessage("Rendering cut in progress...");
+        pollTimerRef.current = setInterval(async () => {
+          try {
+            const statusRes = await getExportStatus(projectId, exportJobId);
+            if (statusRes.progress > 0) {
+              setRenderProgress(statusRes.progress);
+            }
+            if (statusRes.message) {
+              setRenderStageMessage(statusRes.message);
+            }
+            if (statusRes.status === "completed") {
+              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              setRenderProgress(100);
+              setRenderStageMessage("Cut rendered and ready for download");
+              setExportResult({
+                job_id: statusRes.export_id,
+                media_id: statusRes.media_id,
+                export_object_key: statusRes.s3_key,
+                download_url: statusRes.download_url,
+                duration_seconds: statusRes.duration_seconds,
+                file_size_bytes: statusRes.file_size_bytes,
+                segment_count: statusRes.segment_count,
+                resolution,
+                status: "completed",
+                rendered_at: new Date().toISOString(),
+                expires_in_seconds: 3600,
+              });
+              setIsRendering(false);
+            } else if (statusRes.status === "failed") {
+              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              setRenderError(statusRes.error_message || "Export render job failed.");
+              setIsRendering(false);
+            }
+          } catch {
+            // Keep polling until timeout or success
+          }
+        }, 800);
+      } else {
+        setRenderProgress(100);
+        setExportResult(res);
+        setIsRendering(false);
+      }
     } catch (err: unknown) {
-      clearInterval(progressTimer);
+      clearInterval(simulatedTimer);
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
       const msg = err instanceof Error ? err.message : "Failed to render export cut.";
       setRenderError(msg);
-    } finally {
       setIsRendering(false);
     }
   };
@@ -126,11 +266,56 @@ export function ExportModal({
             </div>
           </div>
 
+          {/* Preset Selector */}
+          <div className="space-y-1.5">
+            <span className="block text-[10px] text-[#9ca3af] uppercase tracking-wider font-semibold">
+              Select Export Preset
+            </span>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => handleSelectPreset("last_30s")}
+                className={`rounded border p-2 text-left transition-all ${
+                  exportPreset === "last_30s"
+                    ? "border-[#ffe600] bg-[#ffe600]/10 text-[#ffffff]"
+                    : "border-[#1f2433] bg-[#08090c] text-[#9ca3af] hover:text-[#ffffff]"
+                }`}
+              >
+                <div className="font-bold text-[11px] text-[#ffe600]">Scenario B (30s)</div>
+                <div className="text-[10px] truncate text-[#d1d5db]">Last 30s + Remap</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset("full_cut")}
+                className={`rounded border p-2 text-left transition-all ${
+                  exportPreset === "full_cut"
+                    ? "border-[#a855f7] bg-[#a855f7]/10 text-[#ffffff]"
+                    : "border-[#1f2433] bg-[#08090c] text-[#9ca3af] hover:text-[#ffffff]"
+                }`}
+              >
+                <div className="font-bold text-[11px] text-[#a855f7]">Scenario A (68s)</div>
+                <div className="text-[10px] truncate text-[#d1d5db]">Full Master + Title</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset("timeline")}
+                className={`rounded border p-2 text-left transition-all ${
+                  exportPreset === "timeline"
+                    ? "border-[#22c55e] bg-[#22c55e]/10 text-[#ffffff]"
+                    : "border-[#1f2433] bg-[#08090c] text-[#9ca3af] hover:text-[#ffffff]"
+                }`}
+              >
+                <div className="font-bold text-[11px] text-[#22c55e]">Active Edit</div>
+                <div className="text-[10px] truncate text-[#d1d5db]">Workstation Cuts</div>
+              </button>
+            </div>
+          </div>
+
           {/* Planned Segments Summary */}
           <div className="rounded-lg border border-[#1f2433] bg-[#08090c] p-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#9ca3af]">
-                Active Blueprint Segments ({defaultSegments.length})
+                Active Blueprint Segments ({segmentsToRender.length})
               </span>
               <span className="font-mono text-xs font-bold text-[#ffe600]">
                 {totalCutDuration.toFixed(1)}s Total Cut
@@ -138,7 +323,7 @@ export function ExportModal({
             </div>
 
             <div className="space-y-1.5 max-h-36 overflow-y-auto">
-              {defaultSegments.map((seg, i) => (
+              {segmentsToRender.map((seg, i) => (
                 <div
                   key={i}
                   className="flex items-center justify-between rounded bg-[#11141e] px-2.5 py-1.5 text-[11px] border border-[#1f2433]"
@@ -191,8 +376,8 @@ export function ExportModal({
           {isRendering && (
             <div className="space-y-1.5 rounded-lg border border-[#ffe600]/30 bg-[#ffe600]/10 p-3">
               <div className="flex items-center justify-between text-xs font-bold text-[#ffe600]">
-                <span>Rendering Cut with FFmpeg Engine...</span>
-                <span>{renderProgress}%</span>
+                <span className="truncate pr-2">{renderStageMessage}</span>
+                <span className="font-mono">{renderProgress}%</span>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1f2433]">
                 <div

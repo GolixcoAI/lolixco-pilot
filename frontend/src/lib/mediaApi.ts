@@ -76,6 +76,28 @@ export async function getOrCreateProject(): Promise<ProjectData> {
 }
 
 /**
+ * Explicitly create a new project session with empty workspace.
+ */
+export async function createNewProject(
+  name: string = "Untitled Cut",
+  aspectRatio: string = "16:9",
+): Promise<ProjectData> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${apiBaseUrl}/api/projects`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ name, aspect_ratio: aspectRatio }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to create project: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+/**
  * List all uploaded media assets for a given project.
  */
 export async function listProjectMedia(projectId: string): Promise<MediaItemData[]> {
@@ -601,6 +623,42 @@ export async function renderExportCut(
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.detail || `Export cut render failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export interface ExportJobStatusData {
+  export_id: string;
+  project_id: string;
+  media_id: string;
+  status: "processing" | "completed" | "failed";
+  progress: number;
+  message: string;
+  download_url: string;
+  s3_key: string;
+  duration_seconds: number;
+  file_size_bytes: number;
+  segment_count: number;
+  error_message?: string | null;
+}
+
+/**
+ * Poll live status and progress of an active export rendering cut.
+ */
+export async function getExportStatus(
+  projectId: string,
+  exportId: string,
+): Promise<ExportJobStatusData> {
+  const { apiBaseUrl } = getFrontendConfig();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${apiBaseUrl}/api/projects/${projectId}/export/${exportId}`, {
+    headers,
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Export status query failed (${res.status})`);
   }
   return res.json();
 }

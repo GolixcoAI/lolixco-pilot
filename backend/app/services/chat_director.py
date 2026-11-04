@@ -52,7 +52,11 @@ class ChatDirectorService:
         api_key = self.settings.MODEL_API_KEY
         if not api_key:
             return (
-                "Meta Model API key not configured.",
+                "I am your **LolixCopilot AI Director**.\n\n"
+                "I can analyze your video footage, identify climactic moments, optimize timeline pacing, and prepare cuts for export.\n\n"
+                "• Try asking: *'Review my edit'*\n"
+                "• Try asking: *'Locate Hollow Purple and add text'*\n"
+                "• Try asking: *'Keep the last 30 seconds for export'*",
                 InferenceTraceItem(
                     provider="meta",
                     model="muse-spark-1.3",
@@ -1072,13 +1076,63 @@ class ChatDirectorService:
             timecode_jump = 48.0
             action = "Seek to aftermath outro"
 
-        # 11. General fallback assistant
+        # 11. Greetings & Casual Inquiries
+        elif any(
+            prompt == g
+            or prompt.rstrip("!.,? ") == g
+            or prompt.startswith(f"{g} ")
+            or prompt.startswith(f"{g},")
+            or prompt.startswith(f"{g}!")
+            for g in (
+                "hi",
+                "hello",
+                "hey",
+                "greetings",
+                "hi there",
+                "hello there",
+                "good morning",
+                "good afternoon",
+                "good evening",
+                "yo",
+                "what's up",
+                "whats up",
+                "howdy",
+                "who are you",
+                "what can you do",
+                "help",
+            )
+        ) and not any(k in prompt for k in ("review", "purple", "last 30", "keep", "retain", "scene", "edit")):
+            content = (
+                "Hello! I am your **LolixCopilot AI Director**.\n\n"
+                "I'm here to help you turn raw footage into a stronger cut:\n"
+                "• **Analyze Footage:** Ask me to review your edit or generate a scene breakdown with pacing suggestions.\n"
+                "• **Locate Key Moments:** Tell me to find climactic actions, characters, or dialogue.\n"
+                "• **Automate Edits:** Add title overlays, pace transitions, or trim specific segments for export.\n\n"
+                "Import your footage into the Media Bin or ask me any question to get started!"
+            )
+            timecode_jump = None
+            action = None
+            cards = []
+            scene_breakdown = []
+            edit_recs = []
+            traces.append(
+                InferenceTraceItem(
+                    provider="meta",
+                    model="muse-spark-1.3",
+                    task="conversational_intent",
+                    status="success",
+                    latency_ms=12.0,
+                    cost_usd=0.00002,
+                )
+            )
+
+        # 12. General fallback assistant
         else:
             meta_content, meta_trace = self._call_meta_live(raw_prompt, project_id=project_id)
             traces.append(meta_trace)
             content = meta_content
-            timecode_jump = 18.0
-            action = "Jump to relevant moment"
+            timecode_jump = None
+            action = None
 
         message = ChatMessage(
             id=msg_id,

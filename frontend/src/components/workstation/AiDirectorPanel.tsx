@@ -11,6 +11,7 @@ import {
   KeyMoment,
 } from "@/types/workstation";
 import { sendChatMessage } from "@/lib/mediaApi";
+import { MarkdownView } from "@/components/common/MarkdownView";
 
 interface AiDirectorPanelProps {
   brief: CreativeBriefState;
@@ -337,7 +338,11 @@ export function AiDirectorPanel({
                     : "border border-[#1a1f2c] bg-[#090b10] text-[#e5e7eb]"
                 }`}
               >
-                {msg.content}
+                {isUser ? (
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                ) : (
+                  <MarkdownView content={msg.content} />
+                )}
               </div>
 
               {/* Scene Breakdown Card */}
@@ -435,17 +440,52 @@ export function AiDirectorPanel({
               {/* Inference Trace Card */}
               {msg.inferenceTrace && msg.inferenceTrace.length > 0 && (
                 <div className="rounded-lg border border-[#1f2433] bg-[#08090c] p-2 text-[10px] font-mono text-[#9ca3af] space-y-1.5">
-                  <div className="flex items-center gap-1.5 font-bold text-[#22c55e]">
-                    <span>✓</span>
-                    <span>Inference Trace</span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold text-[#22c55e]">
+                      <span>✓</span>
+                      <span>Verified Provider Inference Trace</span>
+                    </div>
+                    <span className="text-[9px] text-[#64748b]">
+                      {(
+                        msg.inferenceTrace.reduce((acc, t) => acc + (t.latency_ms || 0), 0) /
+                        1000
+                      ).toFixed(2)}
+                      s total
+                    </span>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1 text-[9px] text-[#d1d5db]">
-                    <span>Modal · Muse Glimmer 30B · 4.21s ✓</span>
-                    <span className="text-[#ffe600]">➔</span>
-                    <span>Meta · Muse Spark · 2.73s ✓</span>
-                    <span className="text-[#ffe600]">➔</span>
-                    <span>Baseten · Muse Spark Open · 3.06s ✓</span>
+                    {msg.inferenceTrace.map((trace, idx) => {
+                      const isSuccess = trace.status === "success";
+                      const providerName =
+                        trace.provider === "modal"
+                          ? "Modal"
+                          : trace.provider === "meta"
+                          ? "Meta"
+                          : trace.provider === "baseten"
+                          ? "Baseten"
+                          : trace.provider;
+                      const latencySec = ((trace.latency_ms || 0) / 1000).toFixed(2);
+                      return (
+                        <span key={`${trace.provider}-${idx}`} className="flex items-center gap-1">
+                          {idx > 0 && <span className="text-[#ffe600] font-bold">➔</span>}
+                          <span
+                            className={`rounded px-1.5 py-0.5 border ${
+                              isSuccess
+                                ? "border-[#22c55e]/30 bg-[#162a1c] text-[#86efac]"
+                                : "border-[#eab308]/30 bg-[#262114] text-[#fde047]"
+                            }`}
+                          >
+                            <span className="font-semibold">{providerName}</span>
+                            <span className="text-[#9ca3af]"> · </span>
+                            <span>{trace.model}</span>
+                            <span className="text-[#9ca3af]"> · </span>
+                            <span>{latencySec}s</span>
+                            <span> {isSuccess ? "✓" : "⚡"}</span>
+                          </span>
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               )}

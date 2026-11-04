@@ -584,7 +584,7 @@ class LocalMediaProcessingService(BaseMediaProcessingService):
                 "-c:v",
                 "libx264",
                 "-preset",
-                "fast",
+                "veryfast",
                 "-crf",
                 "21",
             ]

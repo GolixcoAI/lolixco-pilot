@@ -360,6 +360,11 @@ def get_repository(
         return
 
     if active_settings.DATABASE_PROVIDER == "supabase":
+        # If user is using local dev test shortcut token (non-JWT), fallback to memory repository
+        if user and user.access_token and user.access_token.count(".") != 2:
+            yield _default_repo
+            return
+
         if not active_settings.SUPABASE_URL or not active_settings.SUPABASE_PUBLISHABLE_KEY:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

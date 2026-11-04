@@ -111,3 +111,4 @@ async def test_local_render_with_text_overlay():
     finally:
         if os.path.exists(out_path):
             os.remove(out_path)
+

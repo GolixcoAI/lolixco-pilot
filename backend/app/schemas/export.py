@@ -91,3 +91,21 @@ class ExportResponse(BaseModel):
     file_size_bytes: int = Field(..., description="Rendered MP4 file size in bytes")
     segment_count: int = Field(..., description="Number of scenes/segments included in the cut")
     message: str = Field(default="Cut rendered successfully", description="Status message")
+    progress: int = Field(default=100, ge=0, le=100, description="Progress percentage 0-100")
+
+
+class ExportStatusResponse(BaseModel):
+    """Status polling response for asynchronous or long-running export render jobs."""
+
+    export_id: str = Field(..., description="Unique UUID for this export job")
+    project_id: str = Field(..., description="Project ID")
+    media_id: str = Field(..., description="Source media ID")
+    status: str = Field(default="processing", description="Job status: processing, completed, failed")
+    progress: int = Field(default=0, ge=0, le=100, description="Current progress percentage (0-100)")
+    message: str = Field(default="", description="Current status message or stage description")
+    download_url: str = Field(default="", description="Download URL if completed")
+    s3_key: str = Field(default="", description="Storage key if completed")
+    duration_seconds: float = Field(default=0.0, description="Duration in seconds if completed")
+    file_size_bytes: int = Field(default=0, description="File size in bytes if completed")
+    segment_count: int = Field(default=0, description="Number of segments")
+    error_message: str | None = Field(default=None, description="Error detail if failed")

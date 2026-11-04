@@ -42,8 +42,8 @@ export function Timeline({
   const [snapping, setSnapping] = useState(true);
   const rulerRef = useRef<HTMLDivElement>(null);
 
-  const totalDuration = activeClip && activeClip.duration > 0 ? activeClip.duration : (duration > 0 ? duration : 68.08);
-  const playheadPercent = Math.min(100, Math.max(0, (currentTime / totalDuration) * 100));
+  const totalDuration = activeClip && activeClip.duration > 0 ? activeClip.duration : (duration > 0 ? duration : 0);
+  const playheadPercent = totalDuration > 0 ? Math.min(100, Math.max(0, (currentTime / totalDuration) * 100)) : 0;
 
   // SMPTE 30fps timecode formatter: 00:00:12:14
   const formatSMPTE = (sec: number) => {
@@ -56,13 +56,21 @@ export function Timeline({
   };
 
   const rulerTicks = useMemo(() => {
+    if (!activeClip || totalDuration <= 0) {
+      return [
+        { sec: 0.0, label: "00:00" },
+        { sec: 10.0, label: "00:10" },
+        { sec: 20.0, label: "00:20" },
+        { sec: 30.0, label: "00:30" },
+      ];
+    }
     const step = totalDuration > 45 ? 10.0 : 5.0;
     const ticks: Array<{ sec: number; label: string; marker?: string }> = [];
     for (let s = 0.0; s < totalDuration; s += step) {
       let marker: string | undefined;
       if (s === 0.0) marker = "Start";
-      else if (Math.abs(s - 14.0) < 1.0) marker = "Convergence";
-      else if (Math.abs(s - 37.0) < 2.0) marker = "Hollow Purple";
+      else if (Math.abs(s - 14.0) < 1.0 && activeClip?.title?.includes("gojo")) marker = "Convergence";
+      else if (Math.abs(s - 37.0) < 2.0 && activeClip?.title?.includes("gojo")) marker = "Hollow Purple";
       ticks.push({
         sec: s,
         label: formatSMPTE(s).slice(3, 8),
@@ -75,7 +83,7 @@ export function Timeline({
       marker: "End",
     });
     return ticks;
-  }, [totalDuration]);
+  }, [totalDuration, activeClip]);
 
   // Video shots sequence with real thumbnails
   const videoShots = [
@@ -88,7 +96,7 @@ export function Timeline({
   ];
 
   const handleRulerClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!rulerRef.current) return;
+    if (!rulerRef.current || !activeClip || totalDuration <= 0) return;
     const rect = rulerRef.current.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, clickX / rect.width));
@@ -114,9 +122,8 @@ export function Timeline({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`relative px-2.5 py-1.5 transition-colors ${
-                isActive ? "text-[#ffe600]" : "text-[#9ca3af] hover:text-[#f3f4f6]"
-              }`}
+              className={`relative px-2.5 py-1.5 transition-colors ${isActive ? "text-[#ffe600]" : "text-[#9ca3af] hover:text-[#f3f4f6]"
+                }`}
             >
               {tab.label}
               {isActive && (
@@ -159,9 +166,8 @@ export function Timeline({
           <button
             type="button"
             onClick={() => setSnapping(!snapping)}
-            className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
-              snapping ? "bg-[#1f2433] text-[#ffe600]" : "text-[#64748b] hover:text-[#ffffff]"
-            }`}
+            className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${snapping ? "bg-[#1f2433] text-[#ffe600]" : "text-[#64748b] hover:text-[#ffffff]"
+              }`}
           >
             <span>🧲</span>
             <span>Snap</span>
@@ -402,15 +408,17 @@ export function Timeline({
           )}
 
           {/* Yellow Playhead Needle */}
-          <div
-            className="pointer-events-none absolute top-0 bottom-0 z-30 flex flex-col items-center"
-            style={{ left: `${playheadPercent}%` }}
-          >
-            {/* Top yellow inverted triangle */}
-            <div className="h-0 w-0 border-x-4 border-x-transparent border-t-6 border-t-[#ffe600]" />
-            {/* Vertical yellow playhead line */}
-            <div className="h-full w-[2px] bg-[#ffe600] shadow-[0_0_8px_rgba(255,230,0,0.8)]" />
-          </div>
+          {activeClip && totalDuration > 0 && (
+            <div
+              className="pointer-events-none absolute top-0 bottom-0 z-30 flex flex-col items-center"
+              style={{ left: `${playheadPercent}%` }}
+            >
+              {/* Top yellow inverted triangle */}
+              <div className="h-0 w-0 border-x-4 border-x-transparent border-t-6 border-t-[#ffe600]" />
+              {/* Vertical yellow playhead line */}
+              <div className="h-full w-[2px] bg-[#ffe600] shadow-[0_0_8px_rgba(255,230,0,0.8)]" />
+            </div>
+          )}
         </div>
       </div>
     </div>

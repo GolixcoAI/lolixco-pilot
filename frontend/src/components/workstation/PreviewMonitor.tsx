@@ -23,6 +23,7 @@ interface PreviewMonitorProps {
     start_seconds: number;
     end_seconds: number;
   }>;
+  onTimeUpdate?: (seconds: number) => void;
 }
 
 export function PreviewMonitor({
@@ -36,6 +37,7 @@ export function PreviewMonitor({
   onSkipBack,
   onSkipForward,
   textOverlays = [],
+  onTimeUpdate,
 }: PreviewMonitorProps) {
   const [volume, setVolume] = useState(0.8);
   const [playbackSpeed, setPlaybackSpeed] = useState("1.0x");
@@ -57,11 +59,44 @@ export function PreviewMonitor({
 
   useEffect(() => {
     if (videoRef.current && activeClip?.src) {
-      if (Math.abs(videoRef.current.currentTime - currentTime) > 0.4) {
+      if (Math.abs(videoRef.current.currentTime - currentTime) > 0.25) {
         videoRef.current.currentTime = currentTime;
       }
     }
   }, [currentTime, activeClip?.src]);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+      videoRef.current.muted = volume === 0;
+    }
+  }, [volume]);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      const rate = parseFloat(playbackSpeed.replace("x", "")) || 1.0;
+      videoRef.current.playbackRate = rate;
+    }
+  }, [playbackSpeed]);
+
+  // Smooth 60 FPS playhead synchronization from hardware video clock
+  useEffect(() => {
+    let animId: number;
+    const tick = () => {
+      if (videoRef.current && isPlaying && onTimeUpdate) {
+        onTimeUpdate(videoRef.current.currentTime);
+      }
+      if (isPlaying) {
+        animId = requestAnimationFrame(tick);
+      }
+    };
+    if (isPlaying) {
+      animId = requestAnimationFrame(tick);
+    }
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [isPlaying, onTimeUpdate]);
 
   const toggleFullscreen = () => {
     if (!containerRef.current) return;
@@ -144,6 +179,16 @@ export function PreviewMonitor({
               className="h-full w-full object-contain"
               playsInline
               muted={volume === 0}
+              onTimeUpdate={(e) => {
+                if (isPlaying && onTimeUpdate) {
+                  onTimeUpdate(e.currentTarget.currentTime);
+                }
+              }}
+              onEnded={() => {
+                if (isPlaying) {
+                  onTogglePlay();
+                }
+              }}
             />
           ) : (
             <div className="relative h-full w-full">
@@ -159,15 +204,25 @@ export function PreviewMonitor({
 
           {/* Active Text Title Overlay (e.g. Hollow Purple) */}
           {activeClip &&
-            textOverlays?.map((ov) => {
+            textOverlays?.map((ov, idx) => {
               if (currentTime >= ov.start_seconds && currentTime <= ov.end_seconds) {
+                const overlayColor = ov.color || "#a855f7";
                 return (
                   <div
-                    key={ov.id}
+                    key={ov.id || `ov-${idx}`}
                     className="absolute bottom-12 left-1/2 -translate-x-1/2 pointer-events-none z-20 animate-fade-in"
                   >
-                    <div className="rounded border border-[#a855f7]/80 bg-[#000000]/75 px-6 py-2 shadow-[0_0_25px_rgba(168,85,247,0.7)] backdrop-blur-sm">
-                      <span className="font-mono text-2xl font-black uppercase tracking-widest text-[#a855f7] drop-shadow-[0_2px_8px_rgba(168,85,247,0.9)]">
+                    <div
+                      className="rounded border bg-[#000000]/85 px-6 py-2 shadow-2xl backdrop-blur-sm"
+                      style={{
+                        borderColor: overlayColor,
+                        boxShadow: `0 0 25px ${overlayColor}99`,
+                      }}
+                    >
+                      <span
+                        className="font-mono text-2xl font-black uppercase tracking-widest drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]"
+                        style={{ color: overlayColor }}
+                      >
                         {ov.text}
                       </span>
                     </div>
