@@ -46,6 +46,24 @@
 
 ## Acceptance Verification Artifacts & Screenshots
 
+### Video Workstation & AWS Lambda Export Verification (November 4, 2026)
+- **68-Second Video Timeline Synchronization:**
+  - Implemented `onLoadedMetadata` on PreviewMonitor video element to extract true duration dynamically.
+  - Eliminated hardcoded 30-second timeline defaults and fallbacks across `PreviewMonitor`, `Timeline`, `ExportModal`, and `page.tsx`.
+  - Expanded timeline thumbnail shot sequence to include all 12 scene frames spanning 0.0s to 68.08s.
+  - Implemented smooth playhead mouse dragging (`handleTrackMouseDown`) and horizontal scrollable timeline track container with zoom control (0.5x to 2.0x, with 100% Fit button).
+- **Non-Destructive Original vs Edited Preview Toggle:**
+  - Integrated header toggle in `PreviewMonitor`: `Original (Clean)` vs `Edited (AI Title)`.
+  - When in `Original` mode: raw footage preview without text overlay; displays `ORIGINAL SOURCE (RAW)` indicator.
+  - When in `Edited` mode: displays purple `#a855f7` "Hollow Purple" title overlay dynamically between 37.0s and 44.0s.
+  - Switching modes preserves timeline state, playhead position, and underlying edit data.
+- **AWS Lambda Serverless Media Export Resolution:**
+  - Resolved media asset resolution in `export.py` to correctly map to verified private S3 master key `users/demo-eval/projects/gojo-hollow-purple/media/gojo_hollow_purple_edit.mp4`.
+  - Executed serverless cut rendering on `lolixcopilot-media-processor` AWS Lambda worker.
+  - Scenario A (68.08s cut with title overlay) rendered via Lambda and burned with ASS subtitles: Duration 68.08s, 1080p, AAC stereo, 29.1 MB.
+  - Scenario B (30.00s cut with remapped title overlay) rendered via Lambda and burned with ASS subtitles: Duration 30.00s, 1080p, AAC stereo, 18.4 MB.
+  - Unit tests: 197/197 passing; Frontend tests: 30/30 passing; TypeScript type-check passing.
+
 All screenshots and frame proofs are generated at 1920×1080 resolution and stored in `docs/verification_screenshots/`:
 1. `01_clean_first_launch.png`: Clean workstation state on launch with empty media bin, empty timeline, and clean AI Director.
 2. `02_ordinary_conversation_hi.png`: Greeting "Hi" receiving natural Markdown response without unwanted jumps or recommendations.

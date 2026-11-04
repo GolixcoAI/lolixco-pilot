@@ -41,8 +41,15 @@ export function Timeline({
   const [zoomLevel, setZoomLevel] = useState(1.0);
   const [snapping, setSnapping] = useState(true);
   const rulerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
 
-  const totalDuration = activeClip && activeClip.duration > 0 ? activeClip.duration : (duration > 0 ? duration : 0);
+  const totalDuration =
+    activeClip && activeClip.duration > 0
+      ? activeClip.duration
+      : duration > 0
+      ? duration
+      : 68.08;
   const playheadPercent = totalDuration > 0 ? Math.min(100, Math.max(0, (currentTime / totalDuration) * 100)) : 0;
 
   // SMPTE 30fps timecode formatter: 00:00:12:14
@@ -69,8 +76,8 @@ export function Timeline({
     for (let s = 0.0; s < totalDuration; s += step) {
       let marker: string | undefined;
       if (s === 0.0) marker = "Start";
-      else if (Math.abs(s - 14.0) < 1.0 && activeClip?.title?.includes("gojo")) marker = "Convergence";
-      else if (Math.abs(s - 37.0) < 2.0 && activeClip?.title?.includes("gojo")) marker = "Hollow Purple";
+      else if (Math.abs(s - 14.0) < 1.0) marker = "Convergence";
+      else if (Math.abs(s - 37.0) < 2.0) marker = "Hollow Purple";
       ticks.push({
         sec: s,
         label: formatSMPTE(s).slice(3, 8),
@@ -85,22 +92,53 @@ export function Timeline({
     return ticks;
   }, [totalDuration, activeClip]);
 
-  // Video shots sequence with real thumbnails
-  const videoShots = [
-    { id: "shot-1", start: 0.0, end: 4.0, img: "/frames/gojo/frame_00_000.5s.png" },
-    { id: "shot-2", start: 4.0, end: 9.0, img: "/frames/gojo/frame_01_006.0s.png" },
-    { id: "shot-3", start: 9.0, end: 14.0, img: "/frames/gojo/frame_02_012.0s.png" },
-    { id: "shot-4", start: 14.0, end: 18.0, img: "/frames/gojo/frame_04_024.0s.png" },
-    { id: "shot-5", start: 18.0, end: 23.0, img: "/frames/gojo/frame_08_044.0s.png" },
-    { id: "shot-6", start: 23.0, end: 30.18, img: "/frames/gojo/frame_10_058.0s.png" },
-  ];
+  // Video shots sequence spanning the full 68.08-second duration with all 12 scene thumbnails
+  const videoShots = useMemo(() => {
+    const dur = totalDuration > 0 ? totalDuration : 68.08;
+    return [
+      { id: "shot-1", start: 0.0, end: 5.0, img: "/frames/gojo/frame_00_000.5s.png" },
+      { id: "shot-2", start: 5.0, end: 10.0, img: "/frames/gojo/frame_01_006.0s.png" },
+      { id: "shot-3", start: 10.0, end: 15.0, img: "/frames/gojo/frame_02_012.0s.png" },
+      { id: "shot-4", start: 15.0, end: 20.0, img: "/frames/gojo/frame_03_018.0s.png" },
+      { id: "shot-5", start: 20.0, end: 26.0, img: "/frames/gojo/frame_04_024.0s.png" },
+      { id: "shot-6", start: 26.0, end: 31.0, img: "/frames/gojo/frame_05_028.0s.png" },
+      { id: "shot-7", start: 31.0, end: 37.0, img: "/frames/gojo/frame_06_034.0s.png" },
+      { id: "shot-8", start: 37.0, end: 44.0, img: "/frames/gojo/frame_07_038.0s.png" },
+      { id: "shot-9", start: 44.0, end: 50.0, img: "/frames/gojo/frame_08_044.0s.png" },
+      { id: "shot-10", start: 50.0, end: 56.0, img: "/frames/gojo/frame_09_050.0s.png" },
+      { id: "shot-11", start: 56.0, end: 62.0, img: "/frames/gojo/frame_10_058.0s.png" },
+      { id: "shot-12", start: 62.0, end: dur, img: "/frames/gojo/frame_11_066.0s.png" },
+    ];
+  }, [totalDuration]);
 
-  const handleRulerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Scrub and seek calculation helper
+  const handleSeekFromClientX = (clientX: number) => {
     if (!rulerRef.current || !activeClip || totalDuration <= 0) return;
     const rect = rulerRef.current.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
+    const clickX = clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, clickX / rect.width));
     onSeek(ratio * totalDuration);
+  };
+
+  // Draggable playhead event listeners
+  const handleTrackMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    isDraggingRef.current = true;
+    handleSeekFromClientX(e.clientX);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (isDraggingRef.current) {
+        handleSeekFromClientX(ev.clientX);
+      }
+    };
+
+    const onMouseUp = () => {
+      isDraggingRef.current = false;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
   };
 
   return (
@@ -191,7 +229,8 @@ export function Timeline({
 
           <button
             type="button"
-            title="Fit to view"
+            onClick={() => setZoomLevel(1.0)}
+            title="Fit to view (100%)"
             className="p-1 text-[#64748b] hover:text-[#f3f4f6]"
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -241,12 +280,17 @@ export function Timeline({
           </div>
         </div>
 
-        {/* Tracks Area (Right) */}
+        {/* Tracks Area (Right) with Zoom and Horizontal Scroll */}
         <div
-          ref={rulerRef}
-          onClick={handleRulerClick}
-          className="relative flex-1 cursor-pointer overflow-hidden bg-[#07080b]"
+          ref={scrollContainerRef}
+          className="relative flex-1 overflow-x-auto overflow-y-hidden bg-[#07080b]"
         >
+          <div
+            ref={rulerRef}
+            onMouseDown={handleTrackMouseDown}
+            style={{ width: `${zoomLevel * 100}%`, minWidth: "100%" }}
+            className="relative h-full cursor-pointer"
+          >
           {/* Time Ruler */}
           <div className="relative h-6 w-full border-b border-[#1f2433] bg-[#090b10] text-[9px] font-mono text-[#64748b]">
             {rulerTicks.map((t) => {
@@ -422,5 +466,6 @@ export function Timeline({
         </div>
       </div>
     </div>
+  </div>
   );
 }

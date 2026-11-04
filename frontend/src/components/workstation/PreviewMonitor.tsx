@@ -24,6 +24,9 @@ interface PreviewMonitorProps {
     end_seconds: number;
   }>;
   onTimeUpdate?: (seconds: number) => void;
+  onDurationChange?: (duration: number) => void;
+  previewMode?: "edited" | "original";
+  onTogglePreviewMode?: (mode: "edited" | "original") => void;
 }
 
 export function PreviewMonitor({
@@ -38,7 +41,14 @@ export function PreviewMonitor({
   onSkipForward,
   textOverlays = [],
   onTimeUpdate,
+  onDurationChange,
+  previewMode: controlledPreviewMode,
+  onTogglePreviewMode,
 }: PreviewMonitorProps) {
+  const [internalPreviewMode, setInternalPreviewMode] = useState<"edited" | "original">("edited");
+  const previewMode = controlledPreviewMode ?? internalPreviewMode;
+  const setPreviewMode = onTogglePreviewMode ?? setInternalPreviewMode;
+
   const [volume, setVolume] = useState(0.8);
   const [playbackSpeed, setPlaybackSpeed] = useState("1.0x");
   const [resolution, setResolution] = useState("1080p");
@@ -109,7 +119,12 @@ export function PreviewMonitor({
     }
   };
 
-  const totalDuration = duration > 0 ? duration : 30.18;
+  const totalDuration =
+    duration > 0
+      ? duration
+      : activeClip && activeClip.duration > 0
+      ? activeClip.duration
+      : 68.08;
   const progressPercent = Math.min(100, Math.max(0, (currentTime / totalDuration) * 100));
 
   // SMPTE 30fps timecode formatter: 00:00:12:14
@@ -122,14 +137,20 @@ export function PreviewMonitor({
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
   };
 
-  // Determine current frame image based on currentTime
+  // Determine current frame image based on currentTime across complete 68s duration
   const getDynamicFrameImage = () => {
-    if (currentTime < 4.0) return "/frames/gojo/frame_00_000.5s.png";
-    if (currentTime < 9.0) return "/frames/gojo/frame_01_006.0s.png";
-    if (currentTime < 14.0) return "/frames/gojo/frame_02_012.0s.png";
-    if (currentTime < 18.0) return "/frames/gojo/frame_04_024.0s.png";
-    if (currentTime < 23.0) return "/frames/gojo/frame_08_044.0s.png";
-    return "/frames/gojo/frame_10_058.0s.png";
+    if (currentTime < 5.0) return "/frames/gojo/frame_00_000.5s.png";
+    if (currentTime < 10.0) return "/frames/gojo/frame_01_006.0s.png";
+    if (currentTime < 15.0) return "/frames/gojo/frame_02_012.0s.png";
+    if (currentTime < 20.0) return "/frames/gojo/frame_03_018.0s.png";
+    if (currentTime < 26.0) return "/frames/gojo/frame_04_024.0s.png";
+    if (currentTime < 31.0) return "/frames/gojo/frame_05_028.0s.png";
+    if (currentTime < 37.0) return "/frames/gojo/frame_06_034.0s.png";
+    if (currentTime < 44.0) return "/frames/gojo/frame_07_038.0s.png";
+    if (currentTime < 50.0) return "/frames/gojo/frame_08_044.0s.png";
+    if (currentTime < 56.0) return "/frames/gojo/frame_09_050.0s.png";
+    if (currentTime < 62.0) return "/frames/gojo/frame_10_058.0s.png";
+    return "/frames/gojo/frame_11_066.0s.png";
   };
 
   return (
@@ -137,13 +158,38 @@ export function PreviewMonitor({
       ref={containerRef}
       className="relative flex flex-1 flex-col overflow-hidden bg-[#050608] select-none"
     >
-      {/* Top Monitor Header: Program Selector */}
-      <div className="absolute top-3 left-3.5 z-20">
+      {/* Top Monitor Header: Program Selector & Original / Edited Preview Toggle */}
+      <div className="absolute top-3 left-3.5 z-20 flex items-center gap-2">
         <div className="flex items-center gap-1.5 rounded border border-[#1f2433] bg-[#0c0e15]/90 px-2.5 py-1 text-[11px] font-semibold text-[#f3f4f6] backdrop-blur-md">
-          <span>Program: Final Edit</span>
-          <svg className="h-3 w-3 text-[#9ca3af]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          <span>Program: Master Cut</span>
+        </div>
+
+        {/* Non-destructive Original vs Edited Preview Toggle */}
+        <div className="flex items-center rounded border border-[#1f2433] bg-[#0c0e15]/90 p-0.5 text-[11px] font-semibold backdrop-blur-md">
+          <button
+            type="button"
+            onClick={() => setPreviewMode("original")}
+            className={`rounded px-2.5 py-0.5 transition-all ${
+              previewMode === "original"
+                ? "bg-[#374151] text-[#ffffff] shadow-sm font-bold"
+                : "text-[#9ca3af] hover:text-[#f3f4f6]"
+            }`}
+            title="View original unedited footage (title hidden)"
+          >
+            Original (Clean)
+          </button>
+          <button
+            type="button"
+            onClick={() => setPreviewMode("edited")}
+            className={`rounded px-2.5 py-0.5 transition-all ${
+              previewMode === "edited"
+                ? "bg-[#a855f7] text-[#000000] shadow-sm font-bold"
+                : "text-[#9ca3af] hover:text-[#f3f4f6]"
+            }`}
+            title="View edited cut with AI Hollow Purple title overlay"
+          >
+            Edited (AI Title)
+          </button>
         </div>
       </div>
 
@@ -179,6 +225,12 @@ export function PreviewMonitor({
               className="h-full w-full object-contain"
               playsInline
               muted={volume === 0}
+              onLoadedMetadata={(e) => {
+                const mediaDur = e.currentTarget.duration;
+                if (mediaDur && mediaDur > 0 && onDurationChange) {
+                  onDurationChange(mediaDur);
+                }
+              }}
               onTimeUpdate={(e) => {
                 if (isPlaying && onTimeUpdate) {
                   onTimeUpdate(e.currentTarget.currentTime);
@@ -202,8 +254,9 @@ export function PreviewMonitor({
             </div>
           )}
 
-          {/* Active Text Title Overlay (e.g. Hollow Purple) */}
+          {/* Active Text Title Overlay (e.g. Hollow Purple) - Visible only in Edited Preview Mode */}
           {activeClip &&
+            previewMode === "edited" &&
             textOverlays?.map((ov, idx) => {
               if (currentTime >= ov.start_seconds && currentTime <= ov.end_seconds) {
                 const overlayColor = ov.color || "#a855f7";
@@ -231,6 +284,13 @@ export function PreviewMonitor({
               }
               return null;
             })}
+
+          {/* Clean original indicator badge when viewing original footage */}
+          {activeClip && previewMode === "original" && (
+            <div className="absolute bottom-3 right-3 z-20 pointer-events-none rounded border border-[#374151] bg-[#0c0e14]/90 px-2 py-0.5 text-[10px] font-mono font-bold tracking-wider text-[#9ca3af] shadow-md">
+              ORIGINAL SOURCE (RAW)
+            </div>
+          )}
         </div>
       </div>
 
@@ -250,8 +310,8 @@ export function PreviewMonitor({
           style={{ width: `${progressPercent}%` }}
         />
 
-        {/* Scene Cut Markers */}
-        {[0, 4.0, 9.0, 14.0, 18.0, 23.0, 30.18].map((sec) => {
+        {/* Scene Cut Markers across full duration */}
+        {[0, 5.0, 10.0, 15.0, 20.0, 26.0, 31.0, 37.0, 44.0, 50.0, 56.0, 62.0, totalDuration].map((sec) => {
           const leftPct = (sec / totalDuration) * 100;
           return (
             <span

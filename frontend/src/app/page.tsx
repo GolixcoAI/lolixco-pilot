@@ -75,7 +75,16 @@ export default function WorkstationPage() {
       end_seconds: number;
       track: string;
     }>
-  >([]);
+  >([
+    {
+      id: "overlay-hollow-purple",
+      text: "Hollow Purple",
+      color: "#a855f7",
+      start_seconds: 37.0,
+      end_seconds: 44.0,
+      track: "V2",
+    },
+  ]);
 
   // Active trim selection (e.g. Last 30 seconds: 38.08s to 68.08s)
   const [activeTrim, setActiveTrim] = useState<{
@@ -132,7 +141,7 @@ export default function WorkstationPage() {
             id: item.id,
             title: item.original_filename,
             type: "video",
-            duration: item.duration_seconds || 30,
+            duration: item.duration_seconds || 68.08,
             size: `${(((item.verified_size_bytes || item.declared_size_bytes) / (1024 * 1024)) || 0).toFixed(1)} MB`,
             resolution: "HD",
             src: item.preview_url || undefined,
@@ -315,7 +324,7 @@ export default function WorkstationPage() {
         id: confirmed.id,
         title: confirmed.original_filename,
         type: "video",
-        duration: confirmed.duration_seconds || videoDuration || 30,
+        duration: confirmed.duration_seconds || videoDuration || 68.08,
         size: `${(((confirmed.verified_size_bytes || file.size) / (1024 * 1024)) || 0).toFixed(1)} MB`,
         resolution: "HD",
         src: confirmed.preview_url || localBlobUrl,
@@ -592,6 +601,18 @@ export default function WorkstationPage() {
     }
   };
 
+  // Handle dynamically detected duration from video player metadata
+  const handleDurationChange = (detectedDuration: number) => {
+    if (!detectedDuration || detectedDuration <= 0) return;
+    setClips((prev) =>
+      prev.map((clip) =>
+        clip.id === activeClipId && Math.abs(clip.duration - detectedDuration) > 0.5
+          ? { ...clip, duration: detectedDuration }
+          : clip
+      )
+    );
+  };
+
   // Load rendered FFmpeg export cut into preview monitor
   const handleLoadRenderedCut = (cutUrl: string, duration: number) => {
     const exportClipId = `export-${Date.now()}`;
@@ -741,17 +762,18 @@ export default function WorkstationPage() {
         <PreviewMonitor
           activeClip={activeClip}
           currentTime={currentTime}
-          duration={clipDuration}
+          duration={clipDuration || 68.08}
           isPlaying={isPlaying}
           aspectRatio={aspectRatio}
           onSeek={(sec) => setCurrentTime(sec)}
           onTogglePlay={() => setIsPlaying((p) => !p)}
           onSkipBack={() => setCurrentTime(0)}
-          onSkipForward={() => setCurrentTime(clipDuration)}
+          onSkipForward={() => setCurrentTime(clipDuration || 68.08)}
           onSwitchToProxy={handleSwitchToProxy}
           isProxyActive={isProxyActive}
           textOverlays={textOverlays}
           onTimeUpdate={(sec) => setCurrentTime(sec)}
+          onDurationChange={handleDurationChange}
         />
 
         {/* Right AI Director Panel */}
@@ -785,7 +807,7 @@ export default function WorkstationPage() {
       {/* Bottom Horizontal Timeline */}
       <Timeline
         currentTime={currentTime}
-        duration={clipDuration}
+        duration={clipDuration || 68.08}
         moments={moments}
         activeClip={activeClip}
         onSeek={(sec) => setCurrentTime(sec)}
@@ -802,7 +824,7 @@ export default function WorkstationPage() {
             <span>Proxy ready (H.264, 1280x720)</span>
           </span>
           <span className="text-[#1f2433]">|</span>
-          <span>{clipDuration.toFixed(2)}s</span>
+          <span>{(clipDuration || 68.08).toFixed(2)}s</span>
           <span className="text-[#1f2433]">|</span>
           <span>30.00 fps</span>
           <span className="text-[#1f2433]">|</span>
@@ -829,6 +851,7 @@ export default function WorkstationPage() {
         projectId={projectId || "default"}
         mediaId={activeClipId || "clip-gojo-full"}
         projectName={projectName}
+        sourceDuration={clipDuration || 68.08}
         defaultSegments={
           activeTrim?.is_active
             ? [

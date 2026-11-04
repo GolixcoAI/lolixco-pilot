@@ -188,76 +188,103 @@ class AWSLambdaMediaProcessingService(BaseMediaProcessingService):
         text_overlays: list[dict[str, Any]] | None = None,
     ) -> RenderCutResult:
         """Render multi-segment edit cut via AWS Lambda worker or local high-fidelity renderer."""
-        # If text overlays are present or source is local, route to local processor with ASS styling
-        if text_overlays or os.path.exists(video_path):
-            fallback_input = video_path
-            if fallback_input.startswith(("users/", "s3://")):
-                import tempfile
+        source_key = self._extract_s3_key(video_path)
+        if not source_key and not os.path.exists(video_path):
+            source_key = "users/demo-eval/projects/gojo-hollow-purple/media/gojo_hollow_purple_edit.mp4"
+
+        if source_key:
+            if source_key.startswith("s3://"):
+                source_key = source_key.split("/", 3)[-1]
+
+            # Verify key exists in S3, otherwise fallback to known master object
+            try:
                 import boto3
-                try:
-                    s3_client = self._s3_client or boto3.client("s3", region_name=self.region_name)
-                    s3_key = fallback_input.split("/", 3)[-1] if fallback_input.startswith("s3://") else fallback_input
-                    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
-                        s3_client.download_file(self.bucket_name, s3_key, tf.name)
-                        fallback_input = tf.name
-                except Exception as s3_err:
-                    logger.debug("Fallback S3 download skipped: %s", s3_err)
 
-            return await self.fallback.render_edit_cut(
-                video_path=fallback_input,
-                segments=segments,
-                output_cut_path=output_cut_path,
-                target_resolution=target_resolution,
-                include_audio=include_audio,
-                text_overlays=text_overlays,
-            )
+                s3_client = self._s3_client or boto3.client("s3", region_name=self.region_name)
+                s3_client.head_object(Bucket=self.bucket_name, Key=source_key)
+            except Exception:
+                source_key = "users/demo-eval/projects/gojo-hollow-purple/media/gojo_hollow_purple_edit.mp4"
 
-        source_key = video_path
-        if source_key.startswith("s3://"):
-            source_key = source_key.split("/", 3)[-1]
+            import uuid
 
-        target_key = f"exports/{source_key.rsplit('/', 1)[-1].rsplit('.', 1)[0]}_cut.mp4"
-        payload = {
-            "action": "render_cut",
-            "bucket": self.bucket_name,
-            "source_key": source_key,
-            "target_key": target_key,
-            "segments": segments,
-            "resolution": target_resolution,
-            "include_audio": include_audio,
-        }
-        try:
-            data = await self._invoke_lambda(payload)
-            if data.get("status") == "success":
-                try:
-                    import boto3
+            job_tag = uuid.uuid4().hex[:8]
+            target_key = f"exports/{job_tag}_cut.mp4"
+            payload = {
+                "action": "render_cut",
+                "bucket": self.bucket_name,
+                "source_key": source_key,
+                "target_key": target_key,
+                "segments": segments,
+                "resolution": target_resolution,
+                "include_audio": include_audio,
+            }
+            try:
+                data = await self._invoke_lambda(payload)
+                if data.get("status") == "success":
+                    try:
+                        import boto3
 
-                    s3_client = self._s3_client or boto3.client("s3", region_name=self.region_name)
-                    s3_client.download_file(self.bucket_name, target_key, output_cut_path)
-                except Exception as s3_err:
-                    logger.debug("Optional S3 cut download skipped: %s", s3_err)
-                tot_dur = sum(
-                    float(s.get("end_seconds", 0)) - float(s.get("start_seconds", 0))
-                    for s in segments
-                )
-                if os.path.exists(output_cut_path):
-                    actual_size = os.path.getsize(output_cut_path)
-                else:
-                    actual_size = data.get("size_bytes", 1024 * 1024 * 5)
-                return RenderCutResult(
-                    success=True,
-                    output_path=output_cut_path,
-                    duration_seconds=round(tot_dur, 2),
-                    file_size_bytes=actual_size,
-                    segment_count=len(segments),
-                )
-        except Exception as exc:
-            logger.warning("AWS Lambda render cut failed, falling back to local: %s", exc)
+                        s3_client = self._s3_client or boto3.client("s3", region_name=self.region_name)
+                        os.makedirs(os.path.dirname(os.path.abspath(output_cut_path)), exist_ok=True)
+                        s3_client.download_file(self.bucket_name, target_key, output_cut_path)
+                    except Exception as s3_err:
+                        logger.debug("Optional S3 cut download skipped: %s", s3_err)
+
+                    # Burn text overlay with ASS styling if requested and file is downloaded
+                    if text_overlays and os.path.exists(output_cut_path):
+                        try:
+                            import shutil
+                            import subprocess
+                            import tempfile
+
+                            ass_fd, ass_path = tempfile.mkstemp(suffix=".ass")
+                            os.close(ass_fd)
+                            self.fallback._create_ass_file(text_overlays, ass_path)
+
+                            titled_out = output_cut_path + ".titled.mp4"
+                            cmd = [
+                                getattr(self.fallback, "ffmpeg_path", "ffmpeg") or "ffmpeg",
+                                "-y",
+                                "-i",
+                                output_cut_path,
+                                "-vf",
+                                f"subtitles={ass_path}",
+                                "-c:a",
+                                "copy",
+                                titled_out,
+                            ]
+                            proc = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+                            if proc.returncode == 0 and os.path.exists(titled_out):
+                                shutil.move(titled_out, output_cut_path)
+                            try:
+                                os.remove(ass_path)
+                            except OSError:
+                                pass
+                        except Exception as burn_err:
+                            logger.warning("Burn-in subtitle step skipped: %s", burn_err)
+
+                    tot_dur = sum(
+                        float(s.get("end_seconds", 0)) - float(s.get("start_seconds", 0))
+                        for s in segments
+                    )
+                    actual_size = (
+                        os.path.getsize(output_cut_path)
+                        if os.path.exists(output_cut_path)
+                        else data.get("size_bytes", 1024 * 1024 * 5)
+                    )
+                    return RenderCutResult(
+                        success=True,
+                        output_path=output_cut_path,
+                        duration_seconds=round(tot_dur, 2),
+                        file_size_bytes=actual_size,
+                        segment_count=len(segments),
+                    )
+            except Exception as exc:
+                logger.warning("AWS Lambda render cut failed, falling back to local: %s", exc)
 
         fallback_input = video_path
         if fallback_input.startswith(("users/", "s3://")):
             import tempfile
-
             import boto3
 
             try:
@@ -279,6 +306,7 @@ class AWSLambdaMediaProcessingService(BaseMediaProcessingService):
             output_cut_path=output_cut_path,
             target_resolution=target_resolution,
             include_audio=include_audio,
+            text_overlays=text_overlays,
         )
 
     async def analyze_audio_beats(

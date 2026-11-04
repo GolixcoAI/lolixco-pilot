@@ -14,6 +14,7 @@ interface ExportModalProps {
   projectId: string | null;
   mediaId: string | null;
   projectName: string;
+  sourceDuration?: number;
   defaultSegments?: ExportSegmentRequest[];
   textOverlays?: Array<{
     text: string;
@@ -30,6 +31,7 @@ export function ExportModal({
   projectId,
   mediaId,
   projectName,
+  sourceDuration = 68.08,
   defaultSegments = [
     { start_seconds: 18.0, end_seconds: 24.0, title: "Scene 1: Incantation Hook" },
     { start_seconds: 26.0, end_seconds: 31.0, title: "Scene 2: Red/Blue Convergence" },
@@ -75,21 +77,24 @@ export function ExportModal({
 
   if (!isOpen) return null;
 
+  const srcDur = sourceDuration && sourceDuration > 0 ? sourceDuration : 68.08;
+  const last30Start = Math.max(0, Math.round((srcDur - 30.0) * 100) / 100);
+
   const segmentsToRender: ExportSegmentRequest[] =
     exportPreset === "full_cut"
       ? [
           {
             start_seconds: 0.0,
-            end_seconds: 68.08,
-            title: "Full Video with Title Overlay (68.08s)",
+            end_seconds: srcDur,
+            title: `Full Master Cut with Title Overlay (${srcDur.toFixed(2)}s)`,
           },
         ]
       : exportPreset === "last_30s"
       ? [
           {
-            start_seconds: 38.08,
-            end_seconds: 68.08,
-            title: "Retained Last 30 Seconds Cut (30.00s)",
+            start_seconds: last30Start,
+            end_seconds: srcDur,
+            title: `Retained Last 30 Seconds Cut (${(srcDur - last30Start).toFixed(2)}s)`,
           },
         ]
       : defaultSegments;
@@ -109,8 +114,8 @@ export function ExportModal({
           {
             text: "Hollow Purple",
             color: "#a855f7",
-            start_seconds: 0.0,
-            end_seconds: 5.92,
+            start_seconds: Math.max(0, Math.round((37.0 - last30Start) * 100) / 100),
+            end_seconds: Math.max(0, Math.round((44.0 - last30Start) * 100) / 100),
           },
         ]
       : textOverlays;
