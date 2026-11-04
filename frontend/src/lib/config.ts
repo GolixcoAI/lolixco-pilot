@@ -16,9 +16,18 @@ export function getFrontendConfig(): FrontendConfig {
     !isProduction &&
     process.env.NEXT_PUBLIC_ALLOW_LOCAL_AUTH_FALLBACK === "true";
 
+  // In production or inside browser runtimes, default to empty string so fetch
+  // uses relative paths (/api/...) on the current domain without Mixed Content errors.
+  const rawApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  const apiBaseUrl =
+    rawApiBase !== undefined && rawApiBase !== ""
+      ? rawApiBase
+      : isProduction
+        ? ""
+        : "http://localhost:8000";
+
   return {
-    apiBaseUrl:
-      process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000",
+    apiBaseUrl,
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || undefined,
     supabaseAnonKey:
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||

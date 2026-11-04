@@ -46,17 +46,25 @@ class ChatDirectorService:
         self.telemetry = get_telemetry_service()
 
     def _call_meta_live(
-        self, prompt: str, project_id: str | None = None
+        self, prompt: str, project_id: str | None = None, system_prompt: str | None = None
     ) -> tuple[str, InferenceTraceItem]:
-        """Execute live inference on Meta Model API (muse-spark-1.3)."""
+        """Execute live inference on Meta Model API (muse-spark-1.3) with Baseten failover."""
         api_key = self.settings.MODEL_API_KEY
+        sys_content = system_prompt or (
+            "You are LolixCopilot AI Director, an expert video editor. "
+            "Give concise, punchy editing direction with specific timestamps and rationale."
+        )
+
         if not api_key:
+            if self.settings.BASETEN_API_KEY:
+                return self._call_baseten_live(prompt, project_id=project_id, system_prompt=sys_content)
             return (
-                "I am your **LolixCopilot AI Director**.\n\n"
-                "I can analyze your video footage, identify climactic moments, optimize timeline pacing, and prepare cuts for export.\n\n"
-                "• Try asking: *'Review my edit'*\n"
-                "• Try asking: *'Locate Hollow Purple and add text'*\n"
-                "• Try asking: *'Keep the last 30 seconds for export'*",
+                "Hello! I am your **LolixCopilot AI Director**.\n\n"
+                "I'm here to help you turn raw footage into a stronger cut:\n"
+                "• **Analyze Footage:** Ask me to review your edit or generate a scene breakdown with pacing suggestions.\n"
+                "• **Locate Key Moments:** Tell me to find climactic actions, characters, or dialogue.\n"
+                "• **Automate Edits:** Add title overlays, pace transitions, or trim specific segments for export.\n\n"
+                "Import your footage into the Media Bin or ask me any question to get started!",
                 InferenceTraceItem(
                     provider="meta",
                     model="muse-spark-1.3",
@@ -73,21 +81,15 @@ class ChatDirectorService:
         payload = {
             "model": "muse-spark-1.3",
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are LolixCopilot AI Director, an expert video editor. "
-                        "Give concise, punchy editing direction with specific timestamps and rationale."
-                    ),
-                },
+                {"role": "system", "content": sys_content},
                 {"role": "user", "content": prompt},
             ],
-            "max_tokens": 500,
+            "max_tokens": 1200,
         }
 
         start_time = time.time()
         try:
-            with httpx.Client(timeout=25.0) as client:
+            with httpx.Client(timeout=30.0) as client:
                 res = client.post(
                     f"{self.settings.META_BASE_URL}/chat/completions",
                     headers=headers,
@@ -97,68 +99,60 @@ class ChatDirectorService:
 
             if res.status_code == 200:
                 data = res.json()
-                content = (
-                    data.get("choices", [{}])[0].get("message", {}).get("content")
-                    or "Processed intent with Meta Muse Spark."
-                )
-                usage = data.get("usage", {})
-                p_tokens = usage.get("prompt_tokens", 35)
-                c_tokens = usage.get("completion_tokens", 120)
+                choice = data.get("choices", [{}])[0]
+                msg = choice.get("message", {})
+                content = msg.get("content") or msg.get("reasoning_content")
+                if content and content.strip():
+                    usage = data.get("usage", {})
+                    p_tokens = usage.get("prompt_tokens", 35)
+                    c_tokens = usage.get("completion_tokens", 120)
 
-                self.telemetry.record_meta_inference(
-                    model_name="muse-spark-1.3",
-                    prompt_tokens=p_tokens,
-                    completion_tokens=c_tokens,
-                    latency_ms=latency_ms,
-                    project_id=project_id,
-                    success=True,
-                )
+                    self.telemetry.record_meta_inference(
+                        model_name="muse-spark-1.3",
+                        prompt_tokens=p_tokens,
+                        completion_tokens=c_tokens,
+                        latency_ms=latency_ms,
+                        project_id=project_id,
+                        success=True,
+                    )
 
-                trace = InferenceTraceItem(
-                    provider="meta",
-                    model="muse-spark-1.3",
-                    task="reasoning",
-                    status="success",
-                    latency_ms=latency_ms,
-                    prompt_tokens=p_tokens,
-                    completion_tokens=c_tokens,
-                    total_tokens=p_tokens + c_tokens,
-                    cost_usd=round((p_tokens * 0.15 + c_tokens * 0.60) / 1_000_000, 5),
-                )
-                return content.strip(), trace
-            else:
-                logger.warning("Meta API returned status %d: %s", res.status_code, res.text)
-                return (
-                    f"Meta Model API notice: {res.text[:120]}",
-                    InferenceTraceItem(
+                    trace = InferenceTraceItem(
                         provider="meta",
                         model="muse-spark-1.3",
                         task="reasoning",
-                        status="error",
-                        latency_ms=round((time.time() - start_time) * 1000.0, 1),
-                    ),
-                )
+                        status="success",
+                        latency_ms=latency_ms,
+                        prompt_tokens=p_tokens,
+                        completion_tokens=c_tokens,
+                        total_tokens=p_tokens + c_tokens,
+                        cost_usd=round((p_tokens * 0.15 + c_tokens * 0.60) / 1_000_000, 5),
+                    )
+                    return content.strip(), trace
+
+            logger.warning("Meta Model API call returned status %d. Invoking Baseten fallback.", res.status_code)
+            return self._call_baseten_live(prompt, project_id=project_id, system_prompt=sys_content)
         except Exception as exc:
-            logger.warning("Meta API call failed: %s", exc)
-            return (
-                f"Meta API error: {str(exc)[:100]}",
-                InferenceTraceItem(
-                    provider="meta",
-                    model="muse-spark-1.3",
-                    task="reasoning",
-                    status="fallback",
-                    latency_ms=round((time.time() - start_time) * 1000.0, 1),
-                ),
-            )
+            logger.warning("Meta API call failed: %s. Invoking Baseten fallback.", exc)
+            return self._call_baseten_live(prompt, project_id=project_id, system_prompt=sys_content)
 
     def _call_baseten_live(
-        self, prompt: str, project_id: str | None = None
+        self, prompt: str, project_id: str | None = None, system_prompt: str | None = None
     ) -> tuple[str, InferenceTraceItem]:
         """Execute live inference on Baseten (meta-models/muse-spark-open-1026)."""
         api_key = self.settings.BASETEN_API_KEY
+        sys_content = system_prompt or (
+            "You are LolixCopilot AI Director, an expert short-form anime editor. "
+            "Provide sharp editing adjustments, cut points, and transition ideas."
+        )
+
         if not api_key:
             return (
-                "Baseten API key not configured.",
+                "Hello! I am your **LolixCopilot AI Director**.\n\n"
+                "I'm here to help you turn raw footage into a stronger cut:\n"
+                "• **Analyze Footage:** Ask me to review your edit or generate a scene breakdown with pacing suggestions.\n"
+                "• **Locate Key Moments:** Tell me to find climactic actions, characters, or dialogue.\n"
+                "• **Automate Edits:** Add title overlays, pace transitions, or trim specific segments for export.\n\n"
+                "Import your footage into the Media Bin or ask me any question to get started!",
                 InferenceTraceItem(
                     provider="baseten",
                     model="meta-models/muse-spark-open-1026",
@@ -176,21 +170,15 @@ class ChatDirectorService:
         payload = {
             "model": model_name,
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are LolixCopilot AI Director, an expert short-form anime editor. "
-                        "Provide sharp editing adjustments, cut points, and transition ideas."
-                    ),
-                },
+                {"role": "system", "content": sys_content},
                 {"role": "user", "content": prompt},
             ],
-            "max_tokens": 400,
+            "max_tokens": 1200,
         }
 
         start_time = time.time()
         try:
-            with httpx.Client(timeout=25.0) as client:
+            with httpx.Client(timeout=30.0) as client:
                 res = client.post(
                     f"{self.settings.BASETEN_BASE_URL}/chat/completions",
                     headers=headers,
@@ -207,10 +195,9 @@ class ChatDirectorService:
 
             if res.status_code == 200:
                 data = res.json()
-                content = (
-                    data.get("choices", [{}])[0].get("message", {}).get("content")
-                    or "Generated edit strategy via Baseten Muse Spark Open."
-                )
+                choice = data.get("choices", [{}])[0]
+                msg = choice.get("message", {})
+                content = msg.get("content") or msg.get("reasoning_content") or "Generated edit strategy via Baseten Muse Spark Open."
                 usage = data.get("usage", {})
                 p_tokens = usage.get("prompt_tokens", 45)
                 c_tokens = usage.get("completion_tokens", 95)
@@ -239,7 +226,7 @@ class ChatDirectorService:
             else:
                 logger.warning("Baseten returned status %d: %s", res.status_code, res.text)
                 return (
-                    f"Baseten notice: {res.text[:120]}",
+                    f"AI Director notice from Baseten ({res.status_code}): {res.text[:120]}",
                     InferenceTraceItem(
                         provider="baseten",
                         model="meta-models/muse-spark-open-1026",
@@ -249,9 +236,9 @@ class ChatDirectorService:
                     ),
                 )
         except Exception as exc:
-            logger.warning("Baseten call failed: %s", exc)
+            logger.warning("Baseten API call failed: %s", exc)
             return (
-                f"Baseten error: {str(exc)[:100]}",
+                f"AI Director error: {str(exc)[:100]}",
                 InferenceTraceItem(
                     provider="baseten",
                     model="meta-models/muse-spark-open-1026",

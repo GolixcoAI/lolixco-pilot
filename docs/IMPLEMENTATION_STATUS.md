@@ -260,3 +260,38 @@ All screenshots and frame proofs are generated at 1920×1080 resolution and stor
 - **Frontend Vitest:** 30 passed across 4 files.
 - **TypeScript Check:** 0 errors.
 - **Production Frontend Build:** Compiled successfully in 10.5s.
+
+---
+
+## Milestone 8: Final Export Acceptance & AI Director Conversational Chat Remediation
+
+### 1. Real AWS Lambda Media Export Acceptance
+- **Execution:** Invoked `lolixcopilot-media-processor` (RequestId: `6145305d-7169-45d0-84fc-ed17aa868bc7`, Duration: 115296.66 ms, Max Memory Used: 713 MB).
+- **Target Video:** S3 key `users/demo-eval/projects/gojo-hollow-purple/media/gojo_hollow_purple_edit.mp4` for segment `[38.08s, 68.08s]`.
+- **Output Artifact:** `s3://lolixcopilot-media-247673029886-ap-south-1/exports/verify_lambda_test_cut.mp4` (21,020,481 bytes).
+- **Media Probe Verification:** Codec `h264`, Resolution `1920x1080` @ 25fps, Audio `aac` stereo, Duration `30.02s` (exact 30-second retained segment from Hollow Purple climax).
+
+### 2. Defense-in-Depth CloudFront Origin Validation
+- **Custom Header:** CloudFront distribution `E3Q0GBE3CQ8BSW` configured with custom origin header `X-Lolix-Origin-Verify`.
+- **Nginx Ingress Enforcement:** EC2 reverse proxy evaluates `$http_x_lolix_origin_verify` and returns HTTP 403 Forbidden to any direct traffic omitting the secret header, preventing origin bypass alongside prefix list `pl-9aa247f3`.
+
+### 3. Secrets Manager IAM Policy Scoping
+- **Scoped ARN:** Policy `LolixCopilotAppPolicy` on `LolixCopilotAppRole` updated from wildcard to exact secret ARN:
+  `arn:aws:secretsmanager:ap-south-1:247673029886:secret:lolixcopilot/production/backend-a1LUMl`.
+
+### 4. AI Director Conversational Chat Remediation
+- **Problem Statement:** In production browser, sending "HI" or "HELLO" resulted in generic fallback `"Evaluated request: 'HI'. Recommendations mapped to current timeline playhead."`
+- **Root Cause Analysis:**
+  1. `NEXT_PUBLIC_API_BASE_URL` was empty in production, which evaluated through `process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000"` to localhost. The user's browser received `net::ERR_CONNECTION_REFUSED` / Mixed Content.
+  2. `frontend/src/components/workstation/AiDirectorPanel.tsx` caught the fetch exception and emitted a silent fake acknowledgment.
+  3. `backend/app/services/chat_director.py` had a static greeting branch and token budgeting was capped at `max_tokens: 500`. Since Muse Spark reasoning models generate 300 to 600 internal reasoning tokens before output, requests truncated mid-thought.
+- **Remediation Implemented:**
+  1. `frontend/src/lib/config.ts`: Updated `getFrontendConfig` so in production or browser environments, `apiBaseUrl` defaults to empty string `""` for relative path requests (`/api/...`) routed through CloudFront/Nginx.
+  2. `frontend/src/components/workstation/AiDirectorPanel.tsx`: Removed fabricated acknowledgement; replaced with genuine error status display (`Error communicating with AI Director: ...`).
+  3. `backend/app/services/chat_director.py`: Raised token budget to `max_tokens: 1200`, wired conversational greetings and general chat directly to live Meta Muse Spark 1.3 (with automated Baseten fallback), and enabled extraction of reasoning/content fields.
+
+### 5. Verification Suite
+- **Backend Tests:** 197 passed, 0 failed.
+- **Frontend Tests:** 30 passed, 0 failed.
+- **TypeScript Check:** 0 errors.
+- **Next.js Production Build:** Compiled successfully in 18.3s.

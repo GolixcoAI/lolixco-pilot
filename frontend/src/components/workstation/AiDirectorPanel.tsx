@@ -133,13 +133,13 @@ export function AiDirectorPanel({
       if (resp.updated_blueprint && onApplyBlueprint) {
         onApplyBlueprint(resp.updated_blueprint as Record<string, unknown>);
       }
-    } catch {
-      // Graceful offline response
+    } catch (err: unknown) {
+      // Surface real error message, never fabricate fake acknowledgements
+      const errorDetail = err instanceof Error ? err.message : String(err);
       const fallbackMsg: MessageItem = {
         id: `asst-${Date.now()}`,
         role: "assistant",
-        content: `Evaluated request: "${promptText}". Recommendations mapped to current timeline playhead.`,
-        timecodeJump: 18.0,
+        content: `Error communicating with AI Director: ${errorDetail}. Please check your connection or try again.`,
       };
       setMessages((prev) => [...prev, fallbackMsg]);
     } finally {
