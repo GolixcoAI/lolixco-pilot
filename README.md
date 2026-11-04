@@ -27,7 +27,7 @@ An AI-assisted video-editing workstation that understands footage, finds importa
 ## Table of Contents
 
 - [1. Product Introduction](#1-product-introduction)
-- [2. Product Screenshots and Demonstration Video](#2-product-screenshots-and-demonstration-video)
+- [2. Product Screenshot and Demo](#2-product-screenshot-and-demo)
 - [3. Why LolixCopilot Exists](#3-why-lolixcopilot-exists)
 - [4. Key Capabilities](#4-key-capabilities)
 - [5. AI-Assisted Editing Workflow](#5-ai-assisted-editing-workflow)
